@@ -98,6 +98,25 @@ async function main() {
   const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 1 });
   const consoleErrors = [];
+  // A stand-in for LegendKeeper's public view: a single-page app that pushes history entries.
+  await context.route("https://www.legendkeeper.com/**", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: `<!doctype html><body style="margin:0;font:14px sans-serif;background:#16181d;color:#eee">
+        <header style="height:44px;background:#202329"></header><h1 id="t"></h1><a id="next" href="#">Next page</a>
+        <script>
+          const render = () => (document.getElementById("t").textContent = location.pathname);
+          document.getElementById("next").onclick = (e) => {
+            e.preventDefault();
+            const n = Number((/page(\\d+)/.exec(location.pathname) || [0, 0])[1]) + 1;
+            history.pushState({}, "", location.pathname.replace(/[^/]+\\/$/, "page" + n + "/"));
+            render();
+          };
+          addEventListener("popstate", render);
+          render();
+        </script>`,
+    }),
+  );
   const page = await context.newPage();
   page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
   page.on("pageerror", (e) => consoleErrors.push(e.message));
@@ -143,12 +162,32 @@ async function main() {
   await page.waitForTimeout(400);
   await shot("02-page-images");
 
+  console.log("Similar Owlbear tokens");
+  await host((ns) => window.host.addItem({
+    id: "hand-placed", type: "IMAGE", name: "goblin_boss.png", layer: "CHARACTER", visible: true, locked: false, metadata: {},
+    position: { x: 0, y: 0 }, rotation: 0, scale: { x: 1, y: 1 },
+    image: { url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", width: 100, height: 100, mime: "image/png" },
+    grid: { dpi: 100, offset: { x: 50, y: 50 } }, text: { type: "PLAIN", plainText: "", richText: [], style: {} },
+  }), NS);
+  await pop.getByText("Owlbear token named like this page is in this scene.").waitFor();
+  check("an unlinked token named like the page is flagged", (await pop.locator(".token-row").filter({ hasText: "goblin_boss.png" }).count()) === 1);
+  check("a similar token doesn't block importing", await pop.getByText("Choose artwork").isVisible());
+  await shot("02b-similar-token");
+  await pop.getByRole("button", { name: "Use existing" }).click();
+  await page.waitForFunction((ns) => window.host.state.items.find((i) => i.id === "hand-placed")?.metadata[`${ns}/link`]?.resourceId === "goblin", NS, { timeout: 5000 });
+  check("Use existing links the similar token to the page and selects it", (await host(() => window.host.state.selection)).includes("hand-placed"));
+  await pop.getByText("token for this page already exists.").waitFor();
+  check("the adopted token now shows as linked", (await pop.getByText("named like this page").count()) === 0);
+  await host(() => window.host.deleteItems(["hand-placed"]));
+  await pop.getByRole("button", { name: "Edit token" }).waitFor();
+
   console.log("Editor, export, linked token with size");
   await pop.locator(".image-card").nth(1).click();
   await pop.getByRole("button", { name: "Edit token" }).click();
   const modal = page.frameLocator('iframe[data-modal$="/editor"]');
   await modal.locator(".token-layer").waitFor();
   await modal.getByText("Loading artwork").waitFor({ state: "detached" });
+  check("Forged steel and Ember gold frames offered", (await modal.getByRole("button", { name: "Forged steel" }).count()) === 1 && (await modal.getByRole("button", { name: "Ember gold" }).count()) === 1);
   await modal.getByRole("button", { name: "Arcane" }).click();
   await modal.getByRole("button", { name: "Large", exact: true }).click();
   await page.waitForTimeout(400);
@@ -178,7 +217,7 @@ async function main() {
   check("token image loads cross-origin into a canvas (CORS)", await host(() => window.host.mapReadable()));
 
   console.log("Duplicate detection and persistent links");
-  await pop.getByText("A token for this page already exists.").waitFor();
+  await pop.getByText("A linked token for this page already exists.").waitFor();
   check("re-opening the page detects the linked token", true);
   await page.waitForTimeout(2500); // background index sync is debounced
   state = await host(() => window.host.state);
@@ -195,11 +234,11 @@ async function main() {
   check("context menu offered on a linked token", menus.some((m) => m.label === "LK Token Art"), JSON.stringify(menus));
   await pop.getByLabel("Back to search").click();
   await host((id) => window.host.clickContextMenu("io.github.groudonmcl.lk-to-owlbear/import", [id]), item.id);
-  await pop.getByText("A token for this page already exists.").waitFor();
+  await pop.getByText("A linked token for this page already exists.").waitFor();
   check("context menu opens the linked page in the importer", (await host(() => window.host.state.actionOpen)) === true);
 
   await host((id) => window.host.copyItem(id), item.id);
-  await pop.getByText("2 tokens for this page are in this scene.").waitFor();
+  await pop.getByText("2 linked tokens for this page are in this scene.").waitFor();
   check("an Owlbear copy is reported as a second match", true);
   await host(() => window.host.deleteItems(window.host.state.items.map((i) => i.id)));
   await pop.getByRole("button", { name: "Edit token" }).waitFor();
@@ -304,6 +343,35 @@ async function main() {
   check("the panel frames LegendKeeper's public view", (await panelFrame.locator("iframe.lk-frame").getAttribute("src")) === "https://www.legendkeeper.com/p/proj_test01/goblin/");
   check("the GM's Edit in LegendKeeper link opens the LegendKeeper app", (await panelFrame.getByRole("link", { name: /Edit in LegendKeeper/ }).getAttribute("href")) === "https://www.legendkeeper.com/a/proj_test01/goblin/");
   await shot("06-side-panel");
+
+  const lkFrame = () => page.frames().find((f) => f.url().startsWith("https://www.legendkeeper.com/"));
+  const navButton = (name) => panelFrame.getByRole("navigation", { name: "Page navigation" }).getByRole("button", { name, exact: true });
+  const lkUrlEnds = async (suffix) => {
+    for (let i = 0; i < 40 && !lkFrame()?.url().endsWith(suffix); i++) await page.waitForTimeout(100);
+    return lkFrame()?.url() ?? "";
+  };
+  await panelFrame.frameLocator("iframe.lk-frame").getByRole("link", { name: "Next page" }).waitFor();
+  check("panel nav starts with back and forward disabled", (await navButton("Back").isDisabled()) && (await navButton("Forward").isDisabled()));
+  const hostUrl = page.url();
+  await panelFrame.frameLocator("iframe.lk-frame").getByRole("link", { name: "Next page" }).click();
+  await lkUrlEnds("/page1/");
+  await panelFrame.frameLocator("iframe.lk-frame").getByRole("link", { name: "Next page" }).click();
+  await lkUrlEnds("/page2/");
+  await page.waitForTimeout(400);
+  check("following links in the page enables Back", !(await navButton("Back").isDisabled()));
+  await navButton("Back").click();
+  check("Back returns to the previous LegendKeeper page", (await lkUrlEnds("/page1/")).endsWith("/page1/"), lkFrame()?.url());
+  await navButton("Back").click();
+  check("Back again returns to the first page", (await lkUrlEnds("/goblin/")).endsWith("/goblin/"), lkFrame()?.url());
+  await page.waitForTimeout(300);
+  check("Back stops at the first page; Forward is offered", (await navButton("Back").isDisabled()) && !(await navButton("Forward").isDisabled()));
+  await navButton("Forward").click();
+  check("Forward goes forward again", (await lkUrlEnds("/page1/")).endsWith("/page1/"), lkFrame()?.url());
+  await navButton("Home: Goblin Boss").click();
+  check("Home reloads the token's page", (await lkUrlEnds("/goblin/")).endsWith("/goblin/"), lkFrame()?.url());
+  check("panel navigation never navigates Owlbear itself", page.url() === hostUrl);
+  await host(() => (document.getElementById("toasts").innerHTML = ""));
+  await page.locator('iframe[data-popover$="/panel"]').screenshot({ path: path.join(OUT, "06b-panel-nav.png") });
 
   const plain = (id, name, label) => ({
     id, type: "IMAGE", name, layer: "CHARACTER", visible: true, locked: false, metadata: {}, position: { x: 0, y: 0 }, rotation: 0, scale: { x: 1, y: 1 },

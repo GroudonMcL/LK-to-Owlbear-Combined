@@ -45,8 +45,10 @@ minute), so new and renamed pages show up without redeploying.
   browser, and a GM's link always wins.
 - **Where pages open** is each person's choice in the toolbar popover:
   - **Owlbear panel**: a full-height panel on the right showing LegendKeeper's read-only
-    public view. The GM gets an **Edit in LegendKeeper** button that opens the page in
-    the full app; players get **Open in LegendKeeper** (the public view in a tab).
+    public view, with **back**, **home** and **forward** buttons floating over its top bar
+    for following links between pages. The GM gets an **Edit in LegendKeeper** button that
+    opens the page in the full app; players get **Open in LegendKeeper** (the public view
+    in a tab).
   - **New tab**: the full app for the GM, where pages can be edited and DM notes read;
     the public view for players.
 - **Editing pages.** LegendKeeper's app sends `X-Frame-Options: DENY`, so it can't be
@@ -65,11 +67,14 @@ minute), so new and renamed pages show up without redeploying.
   itself.
 - **Linked tokens, no accidental duplicates.** Each token remembers its page by id.
   Opening a page that already has a token offers **Use existing**, **Create another** or
-  **Cancel**. Copies, renamed pages, deleted tokens, tokens in other scenes, broken link
+  **Cancel**. Unlinked tokens in the scene whose name or label looks like the page's title
+  or an alias (for example "Tiamat" for *Tiamat (God Template clip)*) are listed too, and
+  **Use existing** links one to the page instead of importing a new token. Copies, renamed pages, deleted tokens, tokens in other scenes, broken link
   data and failed lookups are all handled explicitly.
 - **Token editor.** A large live preview with drag, wheel or pinch zoom around the
   cursor, rotation, flip, fit/fill/reset, and a dimmed view of the art outside the frame.
-  There are five shapes and nine procedural frames with colour, thickness, spacing,
+  There are five shapes and eleven procedural frames (including hammered *Forged steel*
+  and gold-to-copper *Ember gold*, both with a drop shadow) with colour, thickness, spacing,
   backing and opacity, plus brightness/contrast/saturation and flat-background removal.
   The export comes from the same renderer as the preview.
 - **Automatic size.** A `Size` field, a `Size: Large` line, or a statblock line such as

@@ -1,7 +1,7 @@
 // Procedural frames. Each style paints the band between two insets of the
 // token shape, so every frame works with every shape at any resolution.
 
-import { rgba, shade } from "./color";
+import { mix, rgba, shade } from "./color";
 import type { FrameStyle, ShapeId } from "./model";
 import { samplePerimeter, shapePolygon, type Point } from "./shapes";
 
@@ -177,6 +177,121 @@ function drawRiveted(ctx: Ctx, g: FrameGeometry): void {
   }
 }
 
+/** Deterministic noise, so the preview and the export get the same texture. */
+function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function perimeterLength(points: Point[]): number {
+  return points.reduce((sum, p, i) => {
+    const q = points[(i + 1) % points.length];
+    return sum + Math.hypot(q.x - p.x, q.y - p.y);
+  }, 0);
+}
+
+/** Clips to the frame band (between its outer and inner edges). */
+function clipToBand(ctx: Ctx, g: FrameGeometry): void {
+  ctx.beginPath();
+  for (const inset of [g.outer, g.inner]) {
+    shapePolygon(g.shape, g.R, inset).forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.closePath();
+  }
+  ctx.clip("evenodd");
+}
+
+/**
+ * Hammered-metal pitting: dark dents with a bright fleck on their lit side.
+ * Sizes and counts are in units of the band, so every resolution matches.
+ */
+function hammerTexture(ctx: Ctx, g: FrameGeometry, dark: string, light: string, density: number, grain = 1): void {
+  const w = g.inner - g.outer;
+  const mid = shapePolygon(g.shape, g.R, g.outer + w / 2);
+  const count = Math.round((perimeterLength(mid) / w) * density);
+  const spacing = perimeterLength(mid) / Math.max(1, count);
+  const random = seededRandom(0x1f2e3d);
+  ctx.save();
+  clipToBand(ctx, g);
+  for (const p of samplePerimeter(mid, count)) {
+    const along = (random() - 0.5) * spacing;
+    const across = (random() - 0.5) * w * 1.05;
+    const x = p.x + Math.cos(p.angle) * along - Math.sin(p.angle) * across;
+    const y = p.y + Math.sin(p.angle) * along + Math.cos(p.angle) * across;
+    const r = w * (0.035 + random() * 0.08) * grain;
+    ctx.fillStyle = dark;
+    ctx.beginPath();
+    ctx.ellipse(x + r * 0.3, y + r * 0.3, r, r * (0.6 + random() * 0.4), random() * Math.PI, 0, Math.PI * 2);
+    ctx.fill();
+    if (random() < 0.7) {
+      ctx.fillStyle = light;
+      ctx.beginPath();
+      ctx.arc(x - r * 0.45, y - r * 0.45, r * (0.25 + random() * 0.3), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+/** A shadow falling down and to the right of whatever is drawn next. */
+function dropShadow(ctx: Ctx, w: number, alpha: number): void {
+  ctx.shadowColor = `rgba(0, 0, 0, ${alpha})`;
+  ctx.shadowBlur = w * 0.7;
+  ctx.shadowOffsetX = w * 0.12;
+  ctx.shadowOffsetY = w * 0.3;
+}
+
+/** Forged steel: a broad, pitted band of grey metal with dark rims, casting a drop shadow. */
+function drawHammered(ctx: Ctx, g: FrameGeometry): void {
+  const w = g.inner - g.outer;
+  ctx.save();
+  dropShadow(ctx, w, 0.65);
+  strokeAt(ctx, g, g.outer + w / 2, w, metalGradient(ctx, g.R, g.color, 0.6));
+  ctx.restore();
+  // Broad mottling first, then fine pitting with bright flecks.
+  hammerTexture(ctx, g, rgba(shade(g.color, -0.55), 0.22), rgba(shade(g.color, 0.4), 0.18), 3, 2.2);
+  hammerTexture(ctx, g, rgba(shade(g.color, -0.7), 0.4), rgba(shade(g.color, 0.9), 0.7), 9);
+  strokeAt(ctx, g, g.outer + w * 0.1, w * 0.05, rgba(shade(g.color, 0.55), 0.45));
+  strokeAt(ctx, g, g.outer + w * 0.03, w * 0.06, rgba(shade(g.color, -0.8), 0.95));
+  strokeAt(ctx, g, g.inner - w * 0.035, w * 0.07, rgba(shade(g.color, -0.8), 0.95));
+}
+
+/**
+ * Ember gold: a polished band that runs from pale gold (top left) through
+ * orange to dark copper, with a recessed inner step and a drop shadow.
+ */
+function drawBurnished(ctx: Ctx, g: FrameGeometry): void {
+  const w = g.inner - g.outer;
+  const warm = ctx.createLinearGradient(-g.R * 0.7, -g.R * 0.7, g.R * 0.7, g.R * 0.7);
+  warm.addColorStop(0, mix(g.color, "#fff4a8", 0.78));
+  warm.addColorStop(0.3, mix(g.color, "#ffcf4d", 0.4));
+  warm.addColorStop(0.55, g.color);
+  warm.addColorStop(0.8, shade(mix(g.color, "#8a1c0c", 0.35), -0.3));
+  warm.addColorStop(1, shade(mix(g.color, "#8a1c0c", 0.45), -0.55));
+  ctx.save();
+  dropShadow(ctx, w, 0.6);
+  strokeAt(ctx, g, g.outer + w / 2, w, warm);
+  ctx.restore();
+  // The recessed inner step, set apart by a groove and a lit edge.
+  const step = w * 0.36;
+  strokeAt(ctx, g, g.inner - step / 2, step, "rgba(40, 8, 0, 0.3)");
+  strokeAt(ctx, g, g.inner - step, w * 0.05, rgba(shade(g.color, -0.75), 0.7));
+  strokeAt(ctx, g, g.inner - step - w * 0.04, w * 0.03, rgba(mix(g.color, "#fff4c8", 0.8), 0.45));
+  hammerTexture(ctx, g, rgba(shade(g.color, -0.6), 0.2), rgba(mix(g.color, "#fff4c8", 0.85), 0.35), 5);
+  // Gloss along the outer lip, strongest at the top left.
+  const gloss = ctx.createLinearGradient(-g.R * 0.7, -g.R * 0.7, g.R * 0.7, g.R * 0.7);
+  gloss.addColorStop(0, "rgba(255, 250, 225, 0.85)");
+  gloss.addColorStop(0.55, "rgba(255, 250, 225, 0)");
+  strokeAt(ctx, g, g.outer + w * 0.09, w * 0.07, gloss);
+  strokeAt(ctx, g, g.outer + w * 0.02, w * 0.04, rgba(shade(g.color, -0.8), 0.75));
+  strokeAt(ctx, g, g.inner - w * 0.02, w * 0.04, rgba(shade(g.color, -0.85), 0.85));
+}
+
 const PAINTERS: Record<Exclude<FrameStyle, "none">, (ctx: Ctx, g: FrameGeometry) => void> = {
   line: drawLine,
   double: drawDouble,
@@ -184,6 +299,8 @@ const PAINTERS: Record<Exclude<FrameStyle, "none">, (ctx: Ctx, g: FrameGeometry)
   engraved: drawEngraved,
   arcane: drawArcane,
   riveted: drawRiveted,
+  hammered: drawHammered,
+  burnished: drawBurnished,
 };
 
 export function drawFrame(ctx: Ctx, style: FrameStyle, g: FrameGeometry): void {

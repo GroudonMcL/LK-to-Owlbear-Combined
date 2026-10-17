@@ -14,9 +14,9 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, describeError, type ApiClient } from "../lib/api";
-import { lookupExisting, type ExistingState } from "../lib/existing";
+import { lookupExisting, type ExistingState, type SimilarMatch } from "../lib/existing";
 import { LINK_KEY, type TokenMatch } from "../lib/links";
-import { describeOpenError, openPageById } from "../lib/open";
+import { describeOpenError, openPageById, saveLink } from "../lib/open";
 import { CH_TOKEN_CREATED } from "../platform/channels";
 import type { Platform } from "../platform/types";
 import { Banner, Button, Empty, IconButton, Spinner } from "../ui/components";
@@ -138,6 +138,43 @@ function TokenRow({ match, platform, pageTitle }: { match: TokenMatch; platform:
   );
 }
 
+/** An unlinked token named like the page; "Use" links it to the page and selects it. */
+function SimilarRow({ match, onUse }: { match: SimilarMatch; onUse?: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const { item } = match;
+  const use = async () => {
+    if (!onUse) return;
+    setBusy(true);
+    try {
+      await onUse();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="token-row">
+      {item.image?.url ? <img src={item.image.url} alt="" /> : <span className="token-ph" />}
+      <div className="token-name">
+        <strong>{match.matched}</strong>
+        <span className="row" style={{ gap: 4, flexWrap: "wrap" }}>
+          {match.matched !== item.name && item.name && <span className="faint small">{item.name}</span>}
+          {item.visible === false && (
+            <span className="badge">
+              <EyeOff /> Hidden
+            </span>
+          )}
+          <span className="badge">Not linked</span>
+        </span>
+      </div>
+      {onUse && (
+        <Button size="sm" icon={<Crosshair />} loading={busy} onClick={use} title="Link this token to the page and select it">
+          Use
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function PageView({
   api,
   platform,
@@ -184,10 +221,11 @@ export function PageView({
   }, [load]);
 
   const title = page?.name ?? ref.name;
+  const aliasKey = (page?.aliases ?? []).join("\n");
 
   const check = useCallback(async () => {
-    setExisting(await lookupExisting(platform, projectId, ref.id, title));
-  }, [platform, projectId, ref.id, title]);
+    setExisting(await lookupExisting(platform, projectId, ref.id, title, aliasKey ? aliasKey.split("\n") : []));
+  }, [platform, projectId, ref.id, title, aliasKey]);
 
   useEffect(() => {
     setExisting({ kind: "checking" });
@@ -213,12 +251,21 @@ export function PageView({
   };
 
   const here = existing.kind === "ready" ? existing.here : [];
+  const similar = existing.kind === "ready" ? existing.similar : [];
   const otherScenes = existing.kind === "ready" ? existing.otherScenes : 0;
   const pageGone = error instanceof ApiError && error.code === "PAGE_NOT_FOUND";
   // The import UI stays closed until we know the scene has no linked token, or the GM chooses to go ahead.
   const blocked =
     existing.kind === "no-scene" ||
     (!override && (existing.kind === "checking" || existing.kind === "error" || here.length > 0 || otherScenes > 0));
+
+  /** Adopts an unlinked token for this page: the same link an import would give it. */
+  const useSimilar = async (match: SimilarMatch) => {
+    await saveLink(platform, "GM", projectId, match.item.id, { resourceId: ref.id, name: title });
+    await platform.selectAndFocus([match.item.id]).catch(() => undefined);
+    await platform.notify(`Linked ${match.matched} to ${title}.`, "SUCCESS");
+    await check();
+  };
 
   const unlinkAll = async () => {
     setUnlinking(true);
@@ -303,7 +350,17 @@ export function PageView({
         {here.length > 0 && (
           <Banner
             tone="info"
-            title={here.length === 1 ? "A token for this page already exists." : `${here.length} tokens for this page are in this scene.`}
+            title={
+              here.length === 1 ? (
+                <>
+                  A <strong>linked</strong> token for this page already exists.
+                </>
+              ) : (
+                <>
+                  {here.length} <strong>linked</strong> tokens for this page are in this scene.
+                </>
+              )
+            }
             actions={
               !override && (
                 <>
@@ -330,6 +387,38 @@ export function PageView({
                 This page was renamed in LegendKeeper since the token was made. The link still holds; it uses the page id, not the title.
               </div>
             )}
+          </Banner>
+        )}
+        {similar.length > 0 && (
+          <Banner
+            tone="info"
+            title={
+              similar.length === 1 ? (
+                <>
+                  An <strong>Owlbear</strong> token named like this page is in this scene.
+                </>
+              ) : (
+                <>
+                  {similar.length} <strong>Owlbear</strong> tokens named like this page are in this scene.
+                </>
+              )
+            }
+            actions={
+              similar.length === 1 && (
+                <Button size="sm" variant="primary" icon={<Crosshair />} onClick={() => void useSimilar(similar[0])} title="Link this token to the page and select it">
+                  Use existing
+                </Button>
+              )
+            }
+          >
+            <div className="token-list">
+              {similar.map((m) => (
+                <SimilarRow key={m.item.id} match={m} onUse={similar.length > 1 ? () => useSimilar(m) : undefined} />
+              ))}
+            </div>
+            <div className="small muted" style={{ marginTop: 6 }}>
+              {similar.length === 1 ? "It isn't" : "They aren't"} linked to this page yet. Using one links it, so Open LK Page and these checks find it.
+            </div>
           </Banner>
         )}
         {here.length === 0 && otherScenes > 0 && !override && (

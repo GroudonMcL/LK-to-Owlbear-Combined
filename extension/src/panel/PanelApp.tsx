@@ -2,13 +2,22 @@
 // page, framed. The full app (and so editing) refuses to be framed
 // (X-Frame-Options: DENY), so it opens in a tab.
 
-import { EyeOff, PenLine, SquareArrowOutUpRight, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight, EyeOff, House, PenLine, SquareArrowOutUpRight, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { Role } from "../lib/pageLists";
 import { publicPageUrl, tabUrl } from "../lib/urls";
 import { PANEL_POPOVER_ID } from "../platform/channels";
 import type { Platform } from "../platform/types";
 import { AppHeader, Empty, IconButton, useTheme } from "../ui/components";
+import {
+  canGoBack,
+  canGoForward,
+  frameLoaded,
+  INITIAL_FRAME_HISTORY,
+  lengthChanged,
+  wentBack,
+  wentForward,
+} from "./frameHistory";
 
 const params = new URLSearchParams(location.search);
 const projectId = params.get("project") ?? "";
@@ -49,8 +58,53 @@ export function PanelApp({ platform }: { platform: Platform }) {
           </Empty>
         </main>
       ) : (
-        <iframe className="lk-frame" title={name} src={publicPageUrl(projectId, resourceId)} />
+        <LkFrame />
       )}
+    </div>
+  );
+}
+
+/** The framed public view, with back, home and forward floating over LegendKeeper's top bar. */
+function LkFrame() {
+  const home = publicPageUrl(projectId, resourceId);
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [nav, setNav] = useState(INITIAL_FRAME_HISTORY);
+
+  // Navigations inside the frame don't notify the panel; history.length does change.
+  useEffect(() => {
+    const timer = setInterval(() => setNav((h) => lengthChanged(h, history.length)), 250);
+    return () => clearInterval(timer);
+  }, []);
+
+  const back = () => {
+    if (!canGoBack(nav)) return;
+    setNav(wentBack);
+    history.back();
+  };
+  const forward = () => {
+    if (!canGoForward(nav)) return;
+    setNav(wentForward);
+    history.forward();
+  };
+  // Reassigning src loads the page afresh, as a new entry after the current one.
+  const goHome = () => {
+    if (frame.current) frame.current.src = home;
+  };
+
+  return (
+    <div className="lk-stage">
+      <iframe ref={frame} className="lk-frame" title={name} src={home} onLoad={() => setNav((h) => frameLoaded(h, history.length))} />
+      <nav className="lk-nav" aria-label="Page navigation">
+        <IconButton label="Back" disabled={!canGoBack(nav)} onClick={back}>
+          <ChevronLeft />
+        </IconButton>
+        <IconButton label={`Home: ${name}`} onClick={goHome}>
+          <House />
+        </IconButton>
+        <IconButton label="Forward" disabled={!canGoForward(nav)} onClick={forward}>
+          <ChevronRight />
+        </IconButton>
+      </nav>
     </div>
   );
 }

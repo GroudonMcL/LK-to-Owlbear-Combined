@@ -73,7 +73,7 @@ function PresetPreview({ preset, style, source, transform }: { preset: FramePres
   return <canvas ref={ref} aria-hidden />;
 }
 
-const FRAME_COLORS = ["#d4a64a", "#b8c2cf", "#9a6a3c", "#7a7f8a", "#f4f1ea", "#1c1c22", "#6fc3ff", "#ff6a3d", "#8fd27a", "#b48ef0", "#d9534f"];
+const FRAME_COLORS = ["#d4a64a", "#b8c2cf", "#9a6a3c", "#7a7f8a", "#7c8088", "#d7671f", "#f4f1ea", "#1c1c22", "#6fc3ff", "#ff6a3d", "#8fd27a", "#b48ef0", "#d9534f"];
 const BACKING_COLORS = ["#1d1f27", "#3b2f2a", "#24324a", "#2f3a2b", "#efe6d2", "#ffffff"];
 
 function ColorPicker({

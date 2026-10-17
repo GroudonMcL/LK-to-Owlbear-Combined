@@ -24,6 +24,13 @@ export function shade(hex: string, amount: number): string {
   return toHex({ r: c.r + (target - c.r) * t, g: c.g + (target - c.g) * t, b: c.b + (target - c.b) * t });
 }
 
+/** Blend `a` towards `b` by `t` (0 = a, 1 = b). */
+export function mix(a: string, b: string, t: number): string {
+  const x = parseHex(a);
+  const y = parseHex(b);
+  return toHex({ r: x.r + (y.r - x.r) * t, g: x.g + (y.g - x.g) * t, b: x.b + (y.b - x.b) * t });
+}
+
 export function rgba(hex: string, alpha: number): string {
   const c = parseHex(hex);
   return `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha})`;

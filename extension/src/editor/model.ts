@@ -3,7 +3,7 @@
 
 export type ShapeId = "circle" | "rounded" | "square" | "hexagon" | "hexagonFlat";
 
-export type FrameStyle = "none" | "line" | "double" | "gilded" | "engraved" | "arcane" | "riveted";
+export type FrameStyle = "none" | "line" | "double" | "gilded" | "engraved" | "arcane" | "riveted" | "hammered" | "burnished";
 
 export interface TokenStyle {
   shape: ShapeId;
@@ -72,6 +72,8 @@ export const FRAME_PRESETS: FramePreset[] = [
   { id: "silver", name: "Silver", style: { frame: "gilded", frameColor: "#b8c2cf", borderWidth: 0.1, margin: 0.04 } },
   { id: "engraved", name: "Engraved", style: { frame: "engraved", frameColor: "#7a7f8a", borderWidth: 0.12, margin: 0.04 } },
   { id: "bronze", name: "Iron-bound", style: { frame: "riveted", frameColor: "#9a6a3c", borderWidth: 0.12, margin: 0.04 } },
+  { id: "forged", name: "Forged steel", style: { frame: "hammered", frameColor: "#7c8088", borderWidth: 0.14, margin: 0.06 } },
+  { id: "ember", name: "Ember gold", style: { frame: "burnished", frameColor: "#d7671f", borderWidth: 0.14, margin: 0.06 } },
   { id: "arcane", name: "Arcane", style: { frame: "arcane", frameColor: "#6fc3ff", borderWidth: 0.07, margin: 0.11 } },
   { id: "infernal", name: "Infernal", style: { frame: "arcane", frameColor: "#ff6a3d", borderWidth: 0.07, margin: 0.11 } },
   { id: "double", name: "Double line", style: { frame: "double", frameColor: "#e8d6a8", borderWidth: 0.08, margin: 0.02 } },
