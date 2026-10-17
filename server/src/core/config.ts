@@ -27,8 +27,6 @@ export interface Config {
 
 export class ConfigError extends Error {}
 
-const MIN_ACCESS_TOKEN_LENGTH = 24;
-
 function list(value: string | undefined): string[] {
   return (value ?? "")
     .split(/[,\s]+/)
@@ -48,12 +46,7 @@ export type Env = Record<string, string | undefined>;
 export function loadConfig(env: Env): Config {
   const accessTokens = list(env.LKOB_ACCESS_TOKENS);
   if (accessTokens.length === 0) {
-    throw new ConfigError("LKOB_ACCESS_TOKENS is required (comma-separated, each at least 24 characters)");
-  }
-  for (const token of accessTokens) {
-    if (token.length < MIN_ACCESS_TOKEN_LENGTH) {
-      throw new ConfigError(`Every LKOB_ACCESS_TOKENS entry must be at least ${MIN_ACCESS_TOKEN_LENGTH} characters`);
-    }
+    throw new ConfigError("LKOB_ACCESS_TOKENS is required (one password, or several separated by commas)");
   }
 
   const lkApiKeys = list(env.LK_API_KEYS);

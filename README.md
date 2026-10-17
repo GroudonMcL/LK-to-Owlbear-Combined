@@ -97,8 +97,9 @@ You need a LegendKeeper project on a **paid plan** (API keys require it), a free
      the dashboard).
    - *My Profile → API Tokens → Create Token →* use the **Edit Cloudflare Workers**
      template, then copy the token.
-3. **Choose an access password** for the extension: at least 24 characters, from a
-   password manager.
+3. **Choose an access password** for the extension. Any length works. Whoever has it can
+   search and read your project through the extension (hidden pages too, with an *Admin*
+   key) and upload token images, so pick something longer if that matters to you.
 4. **GitHub secrets.** In this repository: *Settings → Secrets and variables → Actions →
    New repository secret*. Add:
 

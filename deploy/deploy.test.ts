@@ -137,10 +137,16 @@ describe("deploy/secrets.mjs", () => {
     expect(r.json.LK_API_KEYS).toBe("lk_single");
   });
 
-  it("rejects missing keys and short access tokens", async () => {
+  it("rejects a missing key or password", async () => {
     expect((await secrets({ LK_API_KEYS: "", LK_API_KEY: "", LKOB_ACCESS_TOKENS: "a-long-access-token-0123456789" })).code).toBe(1);
-    const short = await secrets({ LK_API_KEYS: "k", LKOB_ACCESS_TOKENS: "short" });
-    expect(short.code).toBe(1);
-    expect(short.out).toContain("24 characters");
+    const noPassword = await secrets({ LK_API_KEYS: "k", LKOB_ACCESS_TOKENS: " " });
+    expect(noPassword.code).toBe(1);
+    expect(noPassword.out).toContain("LKOB_ACCESS_TOKENS");
+  });
+
+  it("accepts a short password", async () => {
+    const r = await secrets({ LK_API_KEYS: "k", LKOB_ACCESS_TOKENS: "goblin" });
+    expect(r.code).toBe(0);
+    expect(r.json.LKOB_ACCESS_TOKENS).toBe("goblin");
   });
 });

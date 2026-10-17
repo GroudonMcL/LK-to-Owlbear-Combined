@@ -18,9 +18,7 @@ function fail(message) {
 
 if (!out) fail("usage: node deploy/secrets.mjs <output.json>");
 if (!keys) fail("Add the LK_API_KEYS repository secret: your LegendKeeper API key (Project Settings → Developers → API Keys).");
-if (!tokens) fail("Add the LKOB_ACCESS_TOKENS repository secret: a long random password you will type into the extension.");
-const short = tokens.split(/[,\s]+/).filter(Boolean).find((t) => t.length < 24);
-if (short !== undefined) fail("Every LKOB_ACCESS_TOKENS entry must be at least 24 characters. Use a password generator.");
+if (!tokens) fail("Add the LKOB_ACCESS_TOKENS repository secret: the password you will type into the extension.");
 
 writeFileSync(out, JSON.stringify({ LK_API_KEYS: keys, LKOB_ACCESS_TOKENS: tokens }), { mode: 0o600 });
 console.log("Secrets validated.");
