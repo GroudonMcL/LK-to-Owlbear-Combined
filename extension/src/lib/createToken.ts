@@ -1,9 +1,11 @@
 // Turns an edited token into an Owlbear item: export → host → build → place.
+// With Owlbear storage it is saved to the GM's assets instead, to drag in.
 
 import type { ImageContent, Item, Layer } from "@owlbear-rodeo/sdk";
 import type { Platform } from "../platform/types";
 import { CH_TOKEN_CREATED } from "../platform/channels";
 import type { ApiClient } from "./api";
+import { rememberAssetLink } from "./assetLinks";
 import { asLinkable, syncRoomIndex } from "./existing";
 import { createLink, LINK_KEY, parseLink } from "./links";
 import type { Placement, TokenHosting } from "./settings";
@@ -18,7 +20,6 @@ export interface CreateTokenRequest {
   cells: number;
   layer: Layer;
   visible: boolean;
-  showLabel: boolean;
   hosting: TokenHosting;
   placement: Placement;
   /** Stable per editor session: a retried click never makes a second token. */
@@ -29,7 +30,8 @@ export type CreateTokenResult =
   | { status: "created"; itemId: string }
   | { status: "placing" }
   | { status: "already-created"; itemId: string }
-  | { status: "cancelled" };
+  /** Saved to the GM's Owlbear storage, to drag onto the map from Owlbear's Assets panel. */
+  | { status: "saved" };
 
 async function existingImport(platform: Platform, importId: string): Promise<Item | null> {
   const items = await platform.getItems();
@@ -46,18 +48,21 @@ export async function createToken(platform: Platform, api: ApiClient | null, req
   const earlier = await existingImport(platform, req.importId);
   if (earlier) return { status: "already-created", itemId: earlier.id };
 
-  let image: ImageContent | null;
-  let cleanupHash: string | null = null;
-  if (req.hosting === "backend") {
-    if (!api) throw new Error("Connect LegendKeeper in Settings, or switch hosting to Owlbear storage.");
-    const uploaded = await api.uploadToken(req.png);
-    image = { url: uploaded.url, width: uploaded.width, height: uploaded.height, mime: uploaded.mime };
-    cleanupHash = uploaded.created ? uploaded.hash : null;
-  } else {
+  const link = createLink(req.projectId, req.resourceId, req.pageTitle, req.importId);
+
+  if (req.hosting === "owlbear") {
+    // Owlbear's upload dialog returns nothing to place, so the GM drags the
+    // token in from Assets and the background page links it then.
     const file = new File([req.png], `${req.name.replace(/[^\w\- ]+/g, "").trim() || "token"}.png`, { type: "image/png" });
-    image = await platform.uploadToOwlbearStorage(file, req.name, req.pixelSize / req.cells);
-    if (!image) return { status: "cancelled" };
+    rememberAssetLink(req.name, link);
+    await platform.saveToOwlbearStorage({ file, name: req.name, dpi: req.pixelSize / req.cells, layer: req.layer, visible: req.visible });
+    return { status: "saved" };
   }
+
+  if (!api) throw new Error("Connect LegendKeeper in Settings, or switch hosting to Owlbear storage.");
+  const uploaded = await api.uploadToken(req.png);
+  const image: ImageContent = { url: uploaded.url, width: uploaded.width, height: uploaded.height, mime: uploaded.mime };
+  const cleanupHash = uploaded.created ? uploaded.hash : null;
 
   const position = await platform.snap(await platform.viewportCenter(), req.cells);
   const item = platform.buildTokenItem({
@@ -68,8 +73,7 @@ export async function createToken(platform: Platform, api: ApiClient | null, req
     position,
     layer: req.layer,
     visible: req.visible,
-    showLabel: req.showLabel,
-    metadata: { [LINK_KEY]: createLink(req.projectId, req.resourceId, req.pageTitle, req.importId) },
+    metadata: { [LINK_KEY]: link },
   });
 
   try {

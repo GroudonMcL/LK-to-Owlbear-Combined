@@ -11,8 +11,8 @@ export function OpenModeField({ isPublic }: { isPublic: boolean | undefined }) {
         label="Open pages in"
         hint={
           mode === "panel"
-            ? "A panel on the right of Owlbear, showing LegendKeeper's public view."
-            : "A new browser tab. The GM gets the full LegendKeeper app, with DM notes."
+            ? "A panel on the right of Owlbear, showing LegendKeeper's read-only public view."
+            : "A new browser tab. The GM gets the full LegendKeeper app, to edit pages and read DM notes."
         }
       >
         <Segmented

@@ -66,7 +66,6 @@ export function EditorApp({ platform }: { platform: Platform }) {
     customCells: 1,
     layer: "CHARACTER",
     visible: true,
-    showLabel: false,
   });
   const [output, setOutput] = useState<OutputSettings>({
     exportSize: settings.exportSize,
@@ -77,7 +76,6 @@ export function EditorApp({ platform }: { platform: Platform }) {
 
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [dupPrompt, setDupPrompt] = useState<DupPrompt>(null);
   const creatingRef = useRef(false);
   // The popover already asked when the GM chose "Create another".
@@ -175,7 +173,6 @@ export function EditorApp({ platform }: { platform: Platform }) {
     creatingRef.current = true;
     setCreating(true);
     setCreateError(null);
-    setNotice(null);
     try {
       if (!(await platform.isSceneReady())) throw new Error("Open a scene in Owlbear Rodeo first.");
       if (!allowDuplicate.current) {
@@ -201,14 +198,12 @@ export function EditorApp({ platform }: { platform: Platform }) {
         cells,
         layer: token.layer,
         visible: token.visible,
-        showLabel: token.showLabel,
         hosting: output.hosting,
         placement: output.placement,
         importId,
       });
-      if (result.status === "cancelled") {
-        setNotice("Nothing was created: the Owlbear image picker was closed. Try again when ready.");
-        return;
+      if (result.status === "saved") {
+        await platform.notify(`Save ${token.name.trim() || page.name} in Owlbear's dialog, then drag it from Assets onto the map.`, "INFO");
       }
       if (result.status === "created" || result.status === "already-created") {
         await platform.notify(`Created ${token.name.trim() || page.name}.`, "SUCCESS");
@@ -367,7 +362,6 @@ export function EditorApp({ platform }: { platform: Platform }) {
             {createError}
           </Banner>
         )}
-        {notice && !dupPrompt && <Banner tone="info">{notice}</Banner>}
         <Button variant="ghost" onClick={close}>
           Cancel
         </Button>

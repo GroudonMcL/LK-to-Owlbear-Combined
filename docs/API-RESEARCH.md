@@ -135,9 +135,13 @@ Tags are on every resource (`tags[]`). `GET /projects/{id}/tags` lists them with
      Every player's browser must be able to load a token anyway. The URL is unguessable
      (content hash).
    - **Owlbear storage.** The token goes to the GM's Owlbear library via `uploadImages`
-     (folder picker). `downloadImages` (image picker, pre-filtered by name) then returns
-     the Owlbear-hosted URL, and the item is built from it with link metadata attached.
-     This needs no backend storage but costs two clicks in Owlbear dialogs.
+     (upload dialog), with its name label baked into the upload. `uploadImages` resolves
+     as soon as the dialog opens and returns nothing, and `ImageUpload` carries no
+     metadata. An earlier version followed it with `downloadImages` to get the hosted URL
+     back, but that picker opened before the upload finished and offered unrelated
+     tokens, so it was dropped. Instead the GM's browser remembers the link by asset name,
+     and the background page attaches it when an item with that name, created by this
+     player, appears in the scene (the GM dragging it from Assets).
 
    A `data:` URL in the item was rejected. It would put hundreds of kB into every
    scene sync, and Owlbear documents no size guarantee for item payloads.

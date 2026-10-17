@@ -160,6 +160,11 @@ async function main() {
   const link = item.metadata["io.github.groudonmcl.lk-to-owlbear/link"];
   check("exactly one token after a double-click", state.items.length === 1, String(state.items.length));
   check("token named after the page", item.name === "Goblin Boss");
+  check(
+    "token labelled with its name in serif, size 18",
+    item.textItemType === "LABEL" && item.text?.plainText === "Goblin Boss" && item.text.style?.fontFamily === "serif" && item.text.style?.fontSize === 18,
+    JSON.stringify({ type: item.textItemType, text: item.text }),
+  );
   check("token on the CHARACTER layer", item.layer === "CHARACTER");
   check("Large footprint: grid.dpi = width / 2", item.grid.dpi === item.image.width / 2, `${item.grid.dpi} vs ${item.image.width}`);
   check("anchor at the image centre", item.grid.offset.x === item.image.width / 2 && item.grid.offset.y === item.image.height / 2);
@@ -249,13 +254,35 @@ async function main() {
   await pop.getByRole("button", { name: "Edit token" }).click();
   await modal.getByText("Loading artwork").waitFor({ state: "detached" });
   await modal.getByText("Output").click();
-  await modal.getByRole("button", { name: "Centre of view" }).click();
   await modal.getByRole("button", { name: "Owlbear storage" }).click();
+  check("placement choice hidden for Owlbear storage", (await modal.getByRole("button", { name: "Click to place" }).count()) === 0);
   await modal.getByRole("button", { name: "Create token" }).click();
-  await page.waitForFunction(() => window.host.state.items.length === 1, null, { timeout: 15_000 });
+  await page.waitForFunction(() => window.host.state.uploads.length === 1 && !document.querySelector("iframe.modal"), null, { timeout: 15_000 });
+  await page.waitForTimeout(500);
   state = await host(() => window.host.state);
-  check("token created from the Owlbear-stored image", state.uploads.length === 1 && state.items[0].image.url.startsWith("data:image/png"));
-  check("upload carried the footprint dpi", state.uploads[0].grid?.dpi === 512);
+  const upload = state.uploads[0];
+  check("only Owlbear's upload dialog opens: no image picker, nothing placed yet", !state.pickerOpened && state.items.length === 0);
+  check("upload carried the footprint dpi", upload.grid?.dpi === 512);
+  check(
+    "upload carries the serif name label",
+    upload.textItemType === "LABEL" && upload.text?.plainText === "Goblin Boss" && upload.text.style?.fontFamily === "serif" && upload.text.style?.fontSize === 18,
+    JSON.stringify(upload.text),
+  );
+  check("upload is filed as a character", upload.typeHint === "CHARACTER");
+  // The GM drags the saved asset from Owlbear's Assets panel onto the map.
+  await host(
+    (u) =>
+      window.host.addItem({
+        id: "from-assets", type: "IMAGE", name: u.name, layer: "CHARACTER", visible: true, locked: false, metadata: {},
+        createdUserId: "gm-user", position: { x: 0, y: 0 }, rotation: 0, scale: { x: 1, y: 1 },
+        image: { url: u.url, width: u.width, height: u.height, mime: u.mime }, grid: u.grid, text: u.text, textItemType: u.textItemType,
+      }),
+    upload,
+  );
+  await page.waitForFunction((ns) => Boolean(window.host.state.items[0]?.metadata[`${ns}/link`]), NS, { timeout: 5000 });
+  state = await host(() => window.host.state);
+  const assetLink = state.items[0].metadata[`${NS}/link`];
+  check("a token dragged in from Owlbear storage is linked to its page", assetLink.projectId === "proj_test01" && assetLink.resourceId === "goblin");
 
   console.log("Page links: Open LK Page and Link LK Page…");
   state = await host(() => window.host.state);
@@ -275,7 +302,7 @@ async function main() {
   check("the side panel is pinned right, full height, and survives click-away", panel.options.anchorOrigin?.horizontal === "RIGHT" && panel.options.disableClickAway === true && panel.options.height === 784);
   await panelFrame.getByText("Goblin Boss").first().waitFor();
   check("the panel frames LegendKeeper's public view", (await panelFrame.locator("iframe.lk-frame").getAttribute("src")) === "https://www.legendkeeper.com/p/proj_test01/goblin/");
-  check("the GM's full-page link opens the LegendKeeper app", (await panelFrame.getByRole("link", { name: /Open in LegendKeeper/ }).getAttribute("href")) === "https://www.legendkeeper.com/a/proj_test01/goblin/");
+  check("the GM's Edit in LegendKeeper link opens the LegendKeeper app", (await panelFrame.getByRole("link", { name: /Edit in LegendKeeper/ }).getAttribute("href")) === "https://www.legendkeeper.com/a/proj_test01/goblin/");
   await shot("06-side-panel");
 
   const plain = (id, name, label) => ({

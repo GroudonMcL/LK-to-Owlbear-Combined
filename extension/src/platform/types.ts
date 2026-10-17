@@ -8,9 +8,21 @@ export interface TokenItemSpec {
   position: Vector2;
   layer: Layer;
   visible: boolean;
-  showLabel: boolean;
   metadata: Metadata;
 }
+
+/** A finished token to save in the GM's Owlbear storage, for them to drag onto the map. */
+export interface TokenUploadSpec {
+  file: File;
+  name: string;
+  /** Image pixels per grid square; sets the footprint. */
+  dpi: number;
+  layer: Layer;
+  visible: boolean;
+}
+
+/** Every token's name label: Owlbear's label text, in a serif face. */
+export const TOKEN_LABEL_FONT = { fontFamily: "serif", fontSize: 18 } as const;
 
 /** Sent to the background page to place a token by clicking the map. */
 export interface PlacementRequest {
@@ -68,8 +80,8 @@ export interface Platform {
   closeSidePanel(id: string): Promise<void>;
   /** Opens this extension's toolbar popover. */
   openAction(): Promise<void>;
-  /** Saves to the GM's Owlbear storage and lets them pick it back, returning its hosted image. */
-  uploadToOwlbearStorage(file: File, name: string, dpi: number): Promise<ImageContent | null>;
+  /** Opens Owlbear's dialog to save a token to the GM's storage. Owlbear reports nothing back. */
+  saveToOwlbearStorage(spec: TokenUploadSpec): Promise<void>;
   buildTokenItem(spec: TokenItemSpec): Item;
   startPlacement(request: PlacementRequest): Promise<void>;
   sendLocal(channel: string, data: unknown): Promise<void>;

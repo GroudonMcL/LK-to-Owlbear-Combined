@@ -156,7 +156,6 @@ export interface TokenInfo {
   customCells: number;
   layer: "CHARACTER" | "MOUNT" | "PROP";
   visible: boolean;
-  showLabel: boolean;
 }
 
 export interface OutputSettings {
@@ -328,17 +327,16 @@ export function Controls(props: {
           <input type="checkbox" checked={!token.visible} onChange={(e) => onToken({ visible: !e.target.checked })} />
           Hidden from players
         </label>
-        <label className="check">
-          <input type="checkbox" checked={token.showLabel} onChange={(e) => onToken({ showLabel: e.target.checked })} />
-          Show name label
-        </label>
       </Section>
 
       <Section icon={<Settings2 className="lead" />} title="Output" note={`${output.exportSize} px`}>
         <Field label="Resolution" hint="512 px is crisp for tokens up to Huge.">
           <Segmented label="Resolution" fill value={output.exportSize} onChange={(exportSize) => onOutput({ exportSize })} options={[256, 512, 1024].map((n) => ({ value: n as ExportSize, label: `${n} px` }))} />
         </Field>
-        <Field label="Image hosting">
+        <Field
+          label="Image hosting"
+          hint={output.hosting === "owlbear" ? "Owlbear asks where to save the token. Then drag it from Assets onto the map; it links to this page." : undefined}
+        >
           <Segmented
             label="Image hosting"
             fill
@@ -350,18 +348,20 @@ export function Controls(props: {
             ]}
           />
         </Field>
-        <Field label="Placement">
-          <Segmented
-            label="Placement"
-            fill
-            value={output.placement}
-            onChange={(placement) => onOutput({ placement })}
-            options={[
-              { value: "center", label: "Centre of view" },
-              { value: "manual", label: "Click to place" },
-            ]}
-          />
-        </Field>
+        {output.hosting === "backend" && (
+          <Field label="Placement">
+            <Segmented
+              label="Placement"
+              fill
+              value={output.placement}
+              onChange={(placement) => onOutput({ placement })}
+              options={[
+                { value: "center", label: "Centre of view" },
+                { value: "manual", label: "Click to place" },
+              ]}
+            />
+          </Field>
+        )}
       </Section>
     </div>
   );

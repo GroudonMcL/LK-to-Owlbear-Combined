@@ -1,10 +1,12 @@
 // Runs for the lifetime of the room (manifest background_url). It owns the
 // pieces that must outlive the popover and editor: the token context menus,
-// click-to-place, keeping the room's cross-scene index current, and telling
-// players' browsers which LegendKeeper project the room uses.
+// click-to-place, linking tokens dragged in from Owlbear storage, keeping the
+// room's cross-scene index current, and telling players' browsers which
+// LegendKeeper project the room uses.
 
 import OBR, { type Item, type Vector2 } from "@owlbear-rodeo/sdk";
 import { ApiClient } from "./lib/api";
+import { linksForPlacedItems, loadAssetLinks } from "./lib/assetLinks";
 import { syncRoomIndex } from "./lib/existing";
 import { LINK_KEY, parseLink } from "./lib/links";
 import { describeOpenError, linkToken, openForToken } from "./lib/open";
@@ -193,6 +195,29 @@ async function startPlacement(request: PlacementRequest): Promise<void> {
   await OBR.notification.show(`Click on the map to place ${request.item.name}. Press Esc to cancel.`, "INFO");
 }
 
+// Tokens dragged in from Owlbear storage -----------------------------------
+
+// Ids in the scene as last seen; null until the scene's first item list, so
+// tokens already there when a scene opens are never mistaken for new ones.
+let seenIds: Set<string> | null = null;
+
+async function linkPlacedAssets(items: Item[]): Promise<void> {
+  const previous = seenIds;
+  seenIds = new Set(items.map((item) => item.id));
+  if (!previous) return;
+  const added = items.filter((item) => !previous.has(item.id));
+  if (added.length === 0) return;
+  const entries = loadAssetLinks();
+  if (entries.length === 0) return;
+  const links = linksForPlacedItems(added, entries, OBR.player.id);
+  if (links.length === 0) return;
+  const byId = new Map(links.map(({ id, link }) => [id, link]));
+  await OBR.scene.items.updateItems([...byId.keys()], (drafts) => {
+    for (const draft of drafts) draft.metadata[LINK_KEY] = { ...byId.get(draft.id)! };
+  });
+  await obrPlatform.sendLocal(CH_TOKEN_CREATED, {}).catch(() => undefined);
+}
+
 // Room index ------------------------------------------------------------
 
 let syncTimer: ReturnType<typeof setTimeout> | undefined;
@@ -215,7 +240,18 @@ OBR.onReady(async () => {
   // The popover (another frame of this extension) saved new settings.
   window.addEventListener("storage", (e) => e.key === SETTINGS_STORAGE_KEY && void syncRoomProject());
   OBR.broadcast.onMessage(CH_PLACE, (event) => void startPlacement(event.data as PlacementRequest));
-  OBR.scene.items.onChange(scheduleIndexSync);
-  OBR.scene.onReadyChange((ready) => ready && scheduleIndexSync());
-  if (await OBR.scene.isReady()) scheduleIndexSync();
+  OBR.scene.items.onChange((items) => {
+    scheduleIndexSync();
+    linkPlacedAssets(items).catch((err) => console.warn("[LegendKeeper] couldn't link a placed token", err));
+  });
+  OBR.scene.onReadyChange((ready) => {
+    seenIds = null;
+    if (!ready) return;
+    scheduleIndexSync();
+    void OBR.scene.items.getItems().then((items) => (seenIds ??= new Set(items.map((item) => item.id)))).catch(() => undefined);
+  });
+  if (await OBR.scene.isReady()) {
+    scheduleIndexSync();
+    seenIds ??= new Set((await OBR.scene.items.getItems()).map((item) => item.id));
+  }
 });

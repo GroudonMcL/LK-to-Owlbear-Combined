@@ -1,7 +1,8 @@
 // The Owlbear side panel for "Open LK Page": LegendKeeper's public view of the
-// page, framed. The full app refuses to be framed, so it opens in a tab.
+// page, framed. The full app (and so editing) refuses to be framed
+// (X-Frame-Options: DENY), so it opens in a tab.
 
-import { EyeOff, SquareArrowOutUpRight, X } from "lucide-react";
+import { EyeOff, PenLine, SquareArrowOutUpRight, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Role } from "../lib/pageLists";
 import { publicPageUrl, tabUrl } from "../lib/urls";
@@ -28,9 +29,15 @@ export function PanelApp({ platform }: { platform: Platform }) {
   return (
     <div className="app">
       <AppHeader title={<span title={name}>{name}</span>} sub="LegendKeeper">
-        <a className="btn btn-sm" href={fullPageUrl} target="_blank" rel="noopener noreferrer" title={role === "GM" ? "Open in LegendKeeper, with DM notes" : "Open in a new tab"}>
-          <SquareArrowOutUpRight /> Open in LegendKeeper
-        </a>
+        {role === "GM" ? (
+          <a className="btn btn-sm" href={fullPageUrl} target="_blank" rel="noopener noreferrer" title="Open the page in LegendKeeper's editor, in a new tab">
+            <PenLine /> Edit in LegendKeeper
+          </a>
+        ) : (
+          <a className="btn btn-sm" href={fullPageUrl} target="_blank" rel="noopener noreferrer" title="Open in a new tab">
+            <SquareArrowOutUpRight /> Open in LegendKeeper
+          </a>
+        )}
         <IconButton label="Close panel" onClick={() => void platform.closeSidePanel(PANEL_POPOVER_ID)}>
           <X />
         </IconButton>

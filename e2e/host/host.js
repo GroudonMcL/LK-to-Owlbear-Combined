@@ -39,6 +39,7 @@
     popovers: {},
     notifications: [],
     uploads: [],
+    pickerOpened: false,
     animatedTo: null,
     actionOpen: false,
     log: [],
@@ -317,11 +318,15 @@
       for (const upload of d.images) {
         const dataUrl = await fileToDataUrl(upload.file);
         const bitmap = await createImageBitmap(upload.file);
-        state.uploads.push({ name: upload.name, grid: upload.grid, url: dataUrl, width: bitmap.width, height: bitmap.height, mime: upload.file.type });
+        state.uploads.push({
+          name: upload.name, grid: upload.grid, url: dataUrl, width: bitmap.width, height: bitmap.height, mime: upload.file.type,
+          text: upload.text, textItemType: upload.textItemType, visible: upload.visible, typeHint: d.typeHint,
+        });
       }
       return {};
     },
     OBR_ASSETS_DOWNLOAD_IMAGES: (_f, d) => {
+      state.pickerOpened = true;
       // Simulates the GM picking the image they just saved.
       const pick = [...state.uploads].reverse().find((u) => !d.defaultSearch || u.name.includes(d.defaultSearch));
       if (!pick) return { images: [] };

@@ -1,6 +1,6 @@
 import OBR, { buildImage, buildImageUpload, type Item, type Theme } from "@owlbear-rodeo/sdk";
 import { CH_PLACE, EDITOR_MODAL_ID, extensionUrl } from "./channels";
-import type { Platform, PlacementRequest, ThemeInfo, TokenItemSpec } from "./types";
+import { TOKEN_LABEL_FONT, type Platform, type PlacementRequest, type ThemeInfo, type TokenItemSpec } from "./types";
 
 function themeInfo(theme: Theme): ThemeInfo {
   return {
@@ -91,22 +91,32 @@ export const obrPlatform: Platform = {
   closeSidePanel: (id) => OBR.popover.close(id),
   openAction: () => OBR.action.open(),
 
-  async uploadToOwlbearStorage(file, name, dpi) {
-    const upload = buildImageUpload(file).name(name).dpi(dpi).build();
-    await OBR.assets.uploadImages([upload], "CHARACTER");
-    const picked = await OBR.assets.downloadImages(false, name, "CHARACTER");
-    return picked[0]?.image ?? null;
+  async saveToOwlbearStorage(spec) {
+    const upload = buildImageUpload(spec.file)
+      .name(spec.name)
+      .dpi(spec.dpi)
+      .visible(spec.visible)
+      .plainText(spec.name)
+      .textItemType("LABEL")
+      .fontFamily(TOKEN_LABEL_FONT.fontFamily)
+      .fontSize(TOKEN_LABEL_FONT.fontSize)
+      .build();
+    // The token layers share their names with Owlbear's asset types.
+    await OBR.assets.uploadImages([upload], spec.layer === "MOUNT" || spec.layer === "PROP" ? spec.layer : "CHARACTER");
   },
 
   buildTokenItem(spec: TokenItemSpec) {
-    let builder = buildImage(spec.image, { dpi: spec.dpi, offset: { x: spec.image.width / 2, y: spec.image.height / 2 } })
+    return buildImage(spec.image, { dpi: spec.dpi, offset: { x: spec.image.width / 2, y: spec.image.height / 2 } })
       .name(spec.name)
       .position(spec.position)
       .layer(spec.layer)
       .visible(spec.visible)
-      .metadata(spec.metadata);
-    if (spec.showLabel) builder = builder.plainText(spec.name).textItemType("LABEL");
-    return builder.build();
+      .metadata(spec.metadata)
+      .plainText(spec.name)
+      .textItemType("LABEL")
+      .fontFamily(TOKEN_LABEL_FONT.fontFamily)
+      .fontSize(TOKEN_LABEL_FONT.fontSize)
+      .build();
   },
 
   startPlacement: (request: PlacementRequest) => OBR.broadcast.sendMessage(CH_PLACE, request, { destination: "LOCAL" }),

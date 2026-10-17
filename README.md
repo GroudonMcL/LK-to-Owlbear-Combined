@@ -44,10 +44,14 @@ minute), so new and renamed pages show up without redeploying.
   for everyone, in the same link format an import uses. A player's choice stays in their own
   browser, and a GM's link always wins.
 - **Where pages open** is each person's choice in the toolbar popover:
-  - **Owlbear panel**: a full-height panel on the right showing LegendKeeper's public view,
-    with **Open in LegendKeeper** (the full app with DM notes for the GM, the public view
-    for players).
-  - **New tab**: the full app for the GM, the public view for players.
+  - **Owlbear panel**: a full-height panel on the right showing LegendKeeper's read-only
+    public view. The GM gets an **Edit in LegendKeeper** button that opens the page in
+    the full app; players get **Open in LegendKeeper** (the public view in a tab).
+  - **New tab**: the full app for the GM, where pages can be edited and DM notes read;
+    the public view for players.
+- **Editing pages.** LegendKeeper's app sends `X-Frame-Options: DENY`, so it can't be
+  shown inside Owlbear, only in its own tab. A GM who wants edit mode by default should
+  set **Open pages in** to **New tab**.
 - **Visibility.** The GM searches every page, with hidden ones flagged. Players search only
   public pages, and a GM link to a hidden page tells players it isn't public. A private
   project has no public view, so its pages open in a new tab, which works for LegendKeeper
@@ -71,8 +75,14 @@ minute), so new and renamed pages show up without redeploying.
 - **Automatic size.** A `Size` field, a `Size: Large` line, or a statblock line such as
   `Large dragon, chaotic evil` sets the footprint: Tiny ½, Small/Medium 1, Large 2,
   Huge 3, Gargantuan 4 (configurable). You can always override it.
+- **Name label.** Every new token is labelled with its name, in a serif face at size 18.
 - **Placement.** Drop at the centre of your view, or click to place with a live preview.
   Right-click a linked token → **LK Token Art** to jump back to its page in the importer.
+- **Owlbear storage.** With this hosting choice, *Create token* opens Owlbear's upload
+  dialog to save the token in your Owlbear storage. Owlbear doesn't tell extensions where
+  it saved the image, so the token isn't placed for you: drag it from Owlbear's **Assets**
+  panel onto the map, and the extension links it to its page as it lands. Choose
+  **Extension server** hosting to have tokens placed straight away.
 
 ### One look
 
@@ -196,7 +206,8 @@ extension. Code layout:
 - The **finished token** is the one image made public: every player's browser has to load
   it. It is published only when the GM presses *Create token*, stored under the SHA-256 of
   its bytes (unguessable, de-duplicated) and served with CORS. If you'd rather not, choose
-  **Owlbear storage** in Settings. Owlbear then saves the token to your own Owlbear storage.
+  **Owlbear storage** in Settings. Owlbear then saves the token to your own Owlbear storage,
+  and you drag it onto the map from Owlbear's Assets panel.
 - Token metadata (`io.github.groudonmcl.lk-to-owlbear/link`) holds only the version,
   project and page ids, the last-known title, the link time and an import id. Room metadata
   holds the selected project's id and name, and a small index of which scenes hold linked

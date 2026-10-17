@@ -189,7 +189,7 @@ export function SettingsView({ platform, onDone }: { platform: Platform; onDone:
             hint={
               settings.hosting === "backend"
                 ? "The finished token is stored on this extension's server and placed straight away."
-                : "Owlbear asks where to save the token, then asks you to pick it. Uses your Owlbear storage."
+                : "Owlbear asks where to save the token in your Owlbear storage. Drag it from Assets onto the map and it links to its page."
             }
           >
             <Segmented

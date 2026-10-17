@@ -3,7 +3,7 @@
 // share it, which lets the full import flow run in a normal browser tab.
 
 import type { Item } from "@owlbear-rodeo/sdk";
-import type { Platform, TokenItemSpec } from "./types";
+import { TOKEN_LABEL_FONT, type Platform, type TokenItemSpec } from "./types";
 
 const SCENE = "lkob.mock.scene";
 const SCENE_META = "lkob.mock.sceneMeta";
@@ -139,12 +139,8 @@ export const mockPlatform: Platform = {
   async openAction() {
     log("Popover opened");
   },
-  async uploadToOwlbearStorage(file) {
-    const url = URL.createObjectURL(file);
-    const bitmap = await createImageBitmap(file);
-    const content = { url, width: bitmap.width, height: bitmap.height, mime: file.type };
-    bitmap.close();
-    return content;
+  async saveToOwlbearStorage(spec) {
+    log(`Owlbear's upload dialog would open for ${spec.name} (${spec.dpi} dpi).`);
   },
   buildTokenItem(spec: TokenItemSpec): Item {
     return {
@@ -164,6 +160,8 @@ export const mockPlatform: Platform = {
       layer: spec.layer,
       image: spec.image,
       grid: { dpi: spec.dpi, offset: { x: spec.image.width / 2, y: spec.image.height / 2 } },
+      text: { type: "PLAIN", plainText: spec.name, richText: [], style: { ...TOKEN_LABEL_FONT } },
+      textItemType: "LABEL",
     } as unknown as Item;
   },
   async startPlacement(request) {
