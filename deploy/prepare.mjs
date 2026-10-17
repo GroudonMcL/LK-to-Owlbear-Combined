@@ -35,15 +35,15 @@ async function cf(path, init = {}) {
   return { ok: true, body };
 }
 
-// A new account has no workers.dev subdomain until one is chosen.
+// The account's workers.dev subdomain, which the Worker's URL is built on.
 const sub = await cf("/workers/subdomain");
 if (!sub.ok) {
   if (sub.status === 403 || sub.status === 401) {
     fail(`Cloudflare refused the API token (${sub.reason}). Create it from the "Edit Cloudflare Workers" template.`);
   }
   fail(
-    `Could not read the account's workers.dev subdomain (Cloudflare said: ${sub.reason}). A new account has none ` +
-      "until you open dash.cloudflare.com → Workers & Pages once and pick one; do that, then re-run this workflow.",
+    `Could not read the account's workers.dev subdomain (Cloudflare said: ${sub.reason}). Check ` +
+      "'Your subdomain' on dash.cloudflare.com → Workers & Pages (set one there if it's missing), then re-run this workflow.",
   );
 }
 console.log(`workers.dev subdomain: ${sub.body.result.subdomain}`);

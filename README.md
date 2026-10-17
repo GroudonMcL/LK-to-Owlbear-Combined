@@ -90,8 +90,9 @@ You need a LegendKeeper project on a **paid plan** (API keys require it), a free
    create a key. With the *Admin* role the GM can also find and open hidden pages; with
    *Member*, hidden pages are left out.
 2. **Cloudflare.**
-   - Open *Workers & Pages* once. Cloudflare asks you to choose a `workers.dev`
-     subdomain the first time.
+   - Your account already has a `workers.dev` subdomain: it's shown as *Your subdomain*
+     on the *Workers & Pages* page (with a *Change* link). You don't need to note it; the
+     deploy finds it and prints your extension URL.
    - Copy your **Account ID** (shown on the *Workers & Pages* overview, or in the URL of
      the dashboard).
    - *My Profile → API Tokens → Create Token →* use the **Edit Cloudflare Workers**
