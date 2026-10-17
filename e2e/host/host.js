@@ -60,6 +60,15 @@
     return u.toString();
   }
 
+  /**
+   * How Owlbear turns a manifest path into a URL: it appends the path to the
+   * extension's origin as text. "/index.html" works; "index.html" yields
+   * "https://hostindex.html". Absolute URLs are used as they are.
+   */
+  function manifestUrl(path) {
+    return /^https?:\/\//.test(path) ? path : new URL(EXT).origin + path;
+  }
+
   function loadFrame(name, url, el) {
     const ref = `ref-${++refCounter}`;
     el.src = withRef(url);
@@ -432,6 +441,7 @@
     state,
     frames,
     /** Fetches the manifest cross-origin, as Owlbear does; this throws unless the host sends CORS headers. */
+    manifestUrl,
     async manifest() {
       try {
         const res = await fetch(`${EXT}/manifest.json`, { mode: "cors" });
@@ -445,13 +455,13 @@
       const background = document.createElement("iframe");
       background.id = "background";
       document.body.appendChild(background);
-      loadFrame("background", manifest.background_url, background);
+      loadFrame("background", manifestUrl(manifest.background_url), background);
       const popover = document.createElement("iframe");
       popover.id = "popover";
       popover.style.width = `${manifest.action.width}px`;
       popover.style.height = `${manifest.action.height}px`;
       document.body.appendChild(popover);
-      loadFrame("popover", manifest.action.popover, popover);
+      loadFrame("popover", manifestUrl(manifest.action.popover), popover);
       drawMap();
       return manifest;
     },

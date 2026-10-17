@@ -110,7 +110,13 @@ async function main() {
   console.log("Manifest and loading");
   const manifest = await host(() => window.host.manifest());
   check("manifest is fetchable cross-origin (CORS)", manifest.status === 200 && manifest.cors, JSON.stringify(manifest.error ?? ""));
-  check("manifest declares popover and background", manifest.body.action?.popover === "index.html" && manifest.body.background_url === "background.html");
+  check("manifest declares popover and background", manifest.body.action?.popover === "/index.html" && manifest.body.background_url === "/background.html");
+  // Owlbear appends manifest paths to the origin as text, so each must start with "/".
+  for (const p of [manifest.body.icon, manifest.body.action?.icon, manifest.body.action?.popover, manifest.body.background_url]) {
+    const url = await host((path) => window.host.manifestUrl(path), p);
+    const res = await fetch(url).catch((err) => ({ status: String(err) }));
+    check(`manifest path ${p} resolves the way Owlbear resolves it`, res.status === 200, `${url} → ${res.status}`);
+  }
   await host(() => window.host.boot());
   const pop = page.frameLocator("#popover");
 
