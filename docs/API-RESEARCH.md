@@ -26,11 +26,14 @@ API key and is handled defensively.
 | Unslashed paths answer `308` to the trailing-slash form (e.g. `/api/v3/projects` → `/api/v3/projects/`). | Live probe |
 | Rate limits per key: 300 req/min, 6,000/h, 60,000/day; 12,000/h per project. `429` carries `Retry-After`. | OpenAPI description |
 
-**Consequence:** a server-side component is mandatory, for CORS as well as for key
-secrecy. It is deployed as a Cloudflare Worker that also hosts the extension, so nothing
-runs on the GM's computer.
-"Selecting a project" means choosing among the projects whose keys the backend
-holds. One key covers exactly one project, so the backend accepts several keys.
+**Consequence:** a server-side relay is mandatory, because of CORS. It is deployed as a
+Cloudflare Worker that also hosts the extension, so nothing runs on the GM's computer.
+Since 2026-10-20 the Worker holds no key: the GM pastes the key into the extension, which
+keeps it in the browser's local storage (never in room or scene metadata) and sends it to
+the Worker with each request. The guide's warning about keys in browser code is about
+publishing a key in a page's code; here the key is the GM's own, typed into their own
+browser, and is never part of the extension or shared with players.
+One key covers exactly one project, so "selecting a project" is automatic.
 
 ### Search and page retrieval
 
@@ -43,7 +46,11 @@ holds. One key covers exactly one project, so the backend accepts several keys.
   `type: page|board|map|time|blank`), sidebar `properties[]`, `tags`, `aliases`, `imageUrl`
   and `banner {enabled,url}`. A resource the caller can't reach returns `404`.
 - `GET .../docs/{docId}/blocks` returns the page as a typed block tree, plus `text` (plain
-  text, one line per text-bearing block).
+  text, one line per text-bearing block). Every block has a `kind`; containers have
+  `children`; text kinds have `content`, an array of runs (text with marks and an optional
+  `link`, a `mention {resourceId, text?, name?}`, or a `break`). `secret` blocks hold
+  content hidden from players; non-admin keys don't receive them. The panel's content
+  view is built from this tree (`server/src/core/lk/content.ts`).
 
 ### Page lists and the public view (from LegendKeeper Link)
 
@@ -123,6 +130,9 @@ Tags are on every resource (`tags[]`). `GET /projects/{id}/tags` lists them with
 | Context menu icons take `filter.every/some` `KeyFilter`s whose `key` may be a path array (e.g. `["metadata", "<ns>/link"]`), and `roles: ["GM"]`. | SDK `KeyFilter`, `ContextMenuIconFilter` |
 | Tool modes receive `onToolClick` with `pointerPosition` in scene space and can be created and removed at runtime. | docs: tool |
 | `OBR.modal.open({ url, width, height, fullScreen })` provides a large surface. Popovers are size-capped by the manifest. | docs: modal |
+| A context menu item may carry an `embed { url, height? }`: a page of the extension shown inside the menu. `OBR.player.getSelection()` tells it which items were right-clicked. | SDK `ContextMenuItem`, docs: context menu |
+| Notes are **images on the `NOTE` layer** with rich text in `text.richText` (Slate nodes); the Text tool makes `TEXT` items. `text.type` says whether `plainText` or `richText` is current. | SDK `TextContent`, Owlbear 2.0 dev log |
+| `scene.items.onChange` sends `OBR_SCENE_ITEMS_SUBSCRIBE`, and its unsubscribe sends `…_UNSUBSCRIBE` for the frame, regardless of other listeners in it. The platform layer therefore shares one subscription per frame. | `lib/api/scene/SceneItemsApi.js` |
 
 ### Decisions forced by these facts
 

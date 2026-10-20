@@ -1,5 +1,6 @@
 // Runs for the lifetime of the room (manifest background_url). It owns the
 // pieces that must outlive the popover and editor: the token context menus,
+// the "LegendKeeper pages" menu on notes and text that name pages,
 // click-to-place, linking tokens dragged in from Owlbear storage, keeping the
 // room's cross-scene index current, and telling players' browsers which
 // LegendKeeper project the room uses.
@@ -10,10 +11,13 @@ import { linksForPlacedItems, loadAssetLinks } from "./lib/assetLinks";
 import { syncRoomIndex } from "./lib/existing";
 import { LINK_KEY, parseLink } from "./lib/links";
 import { describeOpenError, linkToken, openForToken } from "./lib/open";
+import { loadPageList } from "./lib/pageLists";
 import { publishProject } from "./lib/project";
 import { loadSettings, requestNavigation, SETTINGS_STORAGE_KEY } from "./lib/settings";
+import { PageMatcher, type ItemTextMatches } from "./lib/textMatch";
 import { isToken, TOKEN_FILTER } from "./lib/token";
 import {
+  CH_PAGES_REFRESHED,
   CH_PLACE,
   CH_TOKEN_CREATED,
   extensionUrl,
@@ -22,6 +26,7 @@ import {
   OPEN_MENU_ID,
   PLACE_MODE_ID,
   PLACE_TOOL_ID,
+  TEXT_MENU_ID,
 } from "./platform/channels";
 import { obrPlatform } from "./platform/obr";
 import type { PlacementRequest } from "./platform/types";
@@ -80,6 +85,63 @@ async function setupContextMenus(): Promise<void> {
   });
 }
 
+// Scene text -------------------------------------------------------------
+
+// "LegendKeeper pages" appears only on the notes and Text items that name a
+// page. Context menu filters can't call back into the extension, so the menu
+// is re-created, listing those items' ids, whenever the set changes. Each
+// person's menu is local and built from their own page list: a player's
+// matches come from public pages only.
+
+let textMatcher: PageMatcher | null = null;
+let textMenuKey: string | null = null;
+let textTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function setTextMenu(matches: ItemTextMatches[]): Promise<void> {
+  const ids = matches.map((m) => m.source.id).sort();
+  const most = Math.max(0, ...matches.map((m) => m.pages.length));
+  const key = `${ids.join(",")}|${most}`;
+  if (key === textMenuKey) return;
+  textMenuKey = key;
+  if (ids.length === 0) {
+    await OBR.contextMenu.remove(TEXT_MENU_ID).catch(() => undefined);
+    return;
+  }
+  await OBR.contextMenu.create({
+    id: TEXT_MENU_ID,
+    icons: [
+      {
+        icon: extensionUrl("icons/text-link.svg"),
+        label: "LegendKeeper pages",
+        filter: {
+          max: 1,
+          // id == a || id == b || …
+          every: ids.map((id, i) => ({ key: "id", value: id, ...(i < ids.length - 1 ? { coordinator: "||" as const } : {}) })),
+        },
+      },
+    ],
+    embed: { url: extensionUrl("textmenu.html"), height: Math.min(260, 10 + 34 * most) },
+  });
+}
+
+async function scanText(items?: Item[], fresh = false): Promise<void> {
+  try {
+    if (!(await OBR.scene.isReady())) return setTextMenu([]);
+    const role = await OBR.player.getRole();
+    const list = await loadPageList(obrPlatform, role, fresh);
+    if (textMatcher?.pages !== list.pages) textMatcher = new PageMatcher(list.pages);
+    await setTextMenu(textMatcher.matchItems(items ?? (await OBR.scene.items.getItems())));
+  } catch {
+    // Not connected yet, or LegendKeeper unreachable: no menu until the next change.
+    await setTextMenu([]).catch(() => undefined);
+  }
+}
+
+function scheduleTextScan(items?: Item[], fresh = false): void {
+  clearTimeout(textTimer);
+  textTimer = setTimeout(() => void scanText(items, fresh), 400);
+}
+
 // Room project ------------------------------------------------------------
 
 async function syncRoomProject(): Promise<void> {
@@ -124,7 +186,7 @@ async function cancelPlacement(reason: string): Promise<void> {
   await teardownTool();
   if (request.cleanupHash) {
     const settings = loadSettings();
-    if (settings.backendUrl && settings.accessToken) {
+    if (settings.backendUrl && settings.apiKey) {
       await new ApiClient(settings).deleteToken(request.cleanupHash).catch(() => undefined);
     }
   }
@@ -238,18 +300,28 @@ OBR.onReady(async () => {
   await setupContextMenus();
   void syncRoomProject();
   // The popover (another frame of this extension) saved new settings.
-  window.addEventListener("storage", (e) => e.key === SETTINGS_STORAGE_KEY && void syncRoomProject());
+  window.addEventListener("storage", (e) => {
+    if (e.key !== SETTINGS_STORAGE_KEY) return;
+    void syncRoomProject();
+    scheduleTextScan();
+  });
+  OBR.broadcast.onMessage(CH_PAGES_REFRESHED, () => scheduleTextScan(undefined, true));
+  // A player's page list depends on the project the GM records on the room.
+  OBR.room.onMetadataChange(() => scheduleTextScan());
   OBR.broadcast.onMessage(CH_PLACE, (event) => void startPlacement(event.data as PlacementRequest));
   OBR.scene.items.onChange((items) => {
     scheduleIndexSync();
+    scheduleTextScan(items);
     linkPlacedAssets(items).catch((err) => console.warn("[LegendKeeper] couldn't link a placed token", err));
   });
   OBR.scene.onReadyChange((ready) => {
     seenIds = null;
+    scheduleTextScan();
     if (!ready) return;
     scheduleIndexSync();
     void OBR.scene.items.getItems().then((items) => (seenIds ??= new Set(items.map((item) => item.id)))).catch(() => undefined);
   });
+  scheduleTextScan();
   if (await OBR.scene.isReady()) {
     scheduleIndexSync();
     seenIds ??= new Set((await OBR.scene.items.getItems()).map((item) => item.id));

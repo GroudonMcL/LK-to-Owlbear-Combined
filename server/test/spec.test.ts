@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LkClient } from "../src/core/lk/client.js";
-import { PageService, ProjectRegistry } from "../src/core/services.js";
+import { PageService, ProjectResolver } from "../src/core/services.js";
 import { safeFetch } from "../src/node/safeFetch.js";
 import { API_KEY, buildFixtures, PROJECT_ID, startMockLk, type MockLk } from "./mockLk.js";
 
@@ -102,18 +102,21 @@ describe("mock LegendKeeper conforms to the OpenAPI spec", () => {
 describe("the client only calls endpoints the spec defines", () => {
   it("every request in a full search + page + image flow matches a spec path and method", async () => {
     lk.requests.length = 0;
-    const registry = new ProjectRegistry([new LkClient({ baseUrl: lk.baseUrl, apiKey: API_KEY, sleep: async () => {} })]);
-    const pages = new PageService(registry, {
+    const projects = new ProjectResolver();
+    const caller = { keyId: "k", client: new LkClient({ baseUrl: lk.baseUrl, apiKey: API_KEY, sleep: async () => {} }) };
+    const pages = new PageService(projects, {
+      lkBaseUrl: lk.baseUrl,
       maxSourceImageBytes: 10_000_000,
       assetHostAllowlist: null,
       allowInsecureAssetFetch: true,
       fetchImage: safeFetch,
     });
-    await registry.list(true);
-    await pages.search(PROJECT_ID, "goblin", 25);
-    const page = await pages.getPage(PROJECT_ID, "goblin");
-    await pages.getImage(PROJECT_ID, "goblin", page.details.images[0].id);
-    await pages.pageList(PROJECT_ID, "gm");
+    await projects.list(caller, true);
+    await pages.search(caller, PROJECT_ID, "goblin", 25);
+    const page = await pages.getPage(caller, PROJECT_ID, "goblin");
+    await pages.getImage(caller, PROJECT_ID, "goblin", page.details.images[0].id);
+    await pages.pageList(caller, PROJECT_ID);
+    await pages.publicPageList(PROJECT_ID);
 
     const apiCalls = lk.requests.filter((r) => r.includes("/api/"));
     expect(apiCalls.length).toBeGreaterThan(3);

@@ -1,10 +1,12 @@
 import type { HealthResponse, ProjectsResponse } from "@lkob/shared";
-import { ArrowLeft, Check, Eye, EyeOff, PlugZap, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Eye, EyeOff, PlugZap, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ApiClient, describeError } from "../lib/api";
 import { LINK_KEY } from "../lib/links";
+import { loadPageList } from "../lib/pageLists";
 import { publishProject } from "../lib/project";
 import { isConfigured, SAME_ORIGIN_BACKEND, saveSettings, useSettings, type Settings } from "../lib/settings";
+import { CH_PAGES_REFRESHED } from "../platform/channels";
 import type { Platform } from "../platform/types";
 import { Banner, Button, Field, IconButton, Segmented } from "../ui/components";
 import { OpenModeField } from "./OpenModeField";
@@ -19,29 +21,29 @@ type Connection =
 export function SettingsView({ platform, onDone }: { platform: Platform; onDone: () => void }) {
   const settings = useSettings();
   const [url, setUrl] = useState(settings.backendUrl);
-  const [token, setToken] = useState(settings.accessToken);
-  const [showToken, setShowToken] = useState(false);
+  const [key, setKey] = useState(settings.apiKey);
+  const [showKey, setShowKey] = useState(false);
+  const [refresh, setRefresh] = useState<{ kind: "idle" | "busy" } | { kind: "done" | "error"; message: string }>({ kind: "idle" });
   const [connection, setConnection] = useState<Connection>({ kind: "idle" });
   const sceneLinks = useSceneLinks(platform);
   const [clearing, setClearing] = useState(false);
 
-  const connect = async (backendUrl = url, accessToken = token) => {
+  const connect = async (backendUrl = url, apiKey = key) => {
     const cleanUrl = backendUrl.trim().replace(/\/+$/, "");
     if (!/^https?:\/\//.test(cleanUrl)) {
       setConnection({ kind: "error", message: "Enter the server URL, starting with https://" });
       return;
     }
     setConnection({ kind: "testing" });
-    const api = new ApiClient({ backendUrl: cleanUrl, accessToken: accessToken.trim() });
+    const api = new ApiClient({ backendUrl: cleanUrl, apiKey: apiKey.trim() });
     try {
       const health = await api.health();
       const projects = await api.projects(true);
-      saveSettings({ backendUrl: cleanUrl, accessToken: accessToken.trim() });
+      saveSettings({ backendUrl: cleanUrl, apiKey: apiKey.trim() });
       setConnection({ kind: "ok", health, projects });
-      // A single project is selected automatically.
-      if (projects.projects.length === 1 && settings.projectId !== projects.projects[0].id) {
-        selectProject(projects.projects[0]);
-      }
+      // A key opens exactly one project, which is selected automatically.
+      const project = projects.projects[0];
+      if (project && (settings.projectId !== project.id || settings.projectName !== project.name)) selectProject(project);
       if (!health.tokenHosting && settings.hosting === "backend") saveSettings({ hosting: "owlbear" });
     } catch (err) {
       setConnection({ kind: "error", message: describeError(err) });
@@ -50,7 +52,7 @@ export function SettingsView({ platform, onDone }: { platform: Platform; onDone:
 
   // Re-check an existing connection when settings open.
   useEffect(() => {
-    if (settings.backendUrl && settings.accessToken) void connect(settings.backendUrl, settings.accessToken);
+    if (settings.backendUrl && settings.apiKey) void connect(settings.backendUrl, settings.apiKey);
   }, []);
 
   const update = (patch: Partial<Settings>) => saveSettings(patch);
@@ -60,6 +62,26 @@ export function SettingsView({ platform, onDone }: { platform: Platform; onDone:
     void publishProject(platform, next).catch(() => undefined);
   }
   const selected = connection.kind === "ok" ? connection.projects.projects.find((p) => p.id === settings.projectId) : undefined;
+
+  const forget = () => {
+    saveSettings({ apiKey: "", projectId: "", projectName: "" });
+    setKey("");
+    setConnection({ kind: "idle" });
+  };
+
+  // Reloads the page list now (it is otherwise cached for a minute) and tells
+  // the background page and other open frames to re-match against it.
+  const refreshPages = async () => {
+    setRefresh({ kind: "busy" });
+    try {
+      const list = await loadPageList(platform, "GM", true);
+      await platform.sendLocal(CH_PAGES_REFRESHED, {}).catch(() => undefined);
+      const count = `${list.pages.length} page${list.pages.length === 1 ? "" : "s"}`;
+      setRefresh({ kind: "done", message: `${count} loaded${list.truncated ? " (the list stops at 5,000)" : ""}.` });
+    } catch (err) {
+      setRefresh({ kind: "error", message: describeError(err) });
+    }
+  };
   const hostingAvailable = connection.kind !== "ok" || connection.health.tokenHosting;
   const invalidCount = sceneLinks?.invalid.length ?? 0;
   const linkedCount = sceneLinks ? [...sceneLinks.byPage.values()].reduce((n, l) => n + l.length, 0) : 0;
@@ -98,7 +120,7 @@ export function SettingsView({ platform, onDone }: { platform: Platform; onDone:
               <Field
                 label="Server URL"
                 htmlFor="backend-url"
-                hint="The service that holds your LegendKeeper API key. The key never reaches this browser."
+                hint="This extension's server, which passes your requests on to LegendKeeper. It doesn't store your key."
               >
                 <input
                   id="backend-url"
@@ -122,57 +144,62 @@ export function SettingsView({ platform, onDone }: { platform: Platform; onDone:
               </details>
             );
           })()}
-          <Field label="Access password" htmlFor="access-token" hint="The password you chose when deploying (the LKOB_ACCESS_TOKENS secret). Stored only in this browser.">
+          <Field
+            label="LegendKeeper API key"
+            htmlFor="api-key"
+            hint="Project Settings → Developers → API Keys in LegendKeeper. Kept only in this browser, never in the room, so players can't see it."
+          >
             <div className="row">
               <input
-                id="access-token"
+                id="api-key"
                 className="input"
-                type={showToken ? "text" : "password"}
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
+                type={showKey ? "text" : "password"}
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                placeholder="Paste your API key"
                 spellCheck={false}
                 autoComplete="off"
               />
-              <IconButton label={showToken ? "Hide password" : "Show password"} onClick={() => setShowToken((s) => !s)}>
-                {showToken ? <EyeOff /> : <Eye />}
+              <IconButton label={showKey ? "Hide key" : "Show key"} onClick={() => setShowKey((s) => !s)}>
+                {showKey ? <EyeOff /> : <Eye />}
               </IconButton>
             </div>
           </Field>
-          <Button
-            variant={connection.kind === "ok" ? "default" : "primary"}
-            icon={connection.kind === "ok" ? <Check /> : <PlugZap />}
-            loading={connection.kind === "testing"}
-            onClick={() => void connect()}
-            disabled={!url.trim() || !token.trim()}
-          >
-            {connection.kind === "ok" ? "Connected · test again" : "Connect"}
-          </Button>
+          <div className="row">
+            <Button
+              variant={connection.kind === "ok" ? "default" : "primary"}
+              icon={connection.kind === "ok" ? <Check /> : <PlugZap />}
+              loading={connection.kind === "testing"}
+              onClick={() => void connect()}
+              disabled={!url.trim() || !key.trim()}
+              block
+            >
+              {connection.kind === "ok" ? "Connected · test again" : "Connect"}
+            </Button>
+            {settings.apiKey && (
+              <Button icon={<Trash2 />} onClick={forget}>
+                Forget key
+              </Button>
+            )}
+          </div>
           {connection.kind === "error" && <Banner tone="danger" title="Connection failed">{connection.message}</Banner>}
 
-          {connection.kind === "ok" && (
-            <Field label="Project" hint="Each server API key opens exactly one LegendKeeper project.">
-              <div className="stack" style={{ gap: 6 }}>
-                {connection.projects.projects.map((p) => (
-                  <label key={p.id} className="check card" style={{ padding: "9px 11px" }}>
-                    <input
-                      type="radio"
-                      name="project"
-                      checked={settings.projectId === p.id}
-                      onChange={() => selectProject(p)}
-                    />
-                    <span style={{ flex: 1 }}>{p.name}</span>
-                    <span className="faint small">{p.id}</span>
-                  </label>
-                ))}
-                {connection.projects.projects.length === 0 && (
-                  <Banner tone="warn">The server has no working LegendKeeper keys.</Banner>
-                )}
-                {connection.projects.failures.map((f) => (
-                  <Banner key={f.keyIndex} tone="warn" title={`Server key #${f.keyIndex + 1} isn't working`}>
-                    {f.message}
-                  </Banner>
-                ))}
+          {connection.kind === "ok" && selected && (
+            <Field label="Project" hint="An API key opens exactly one LegendKeeper project.">
+              <div className="check card" style={{ padding: "9px 11px" }}>
+                <span style={{ flex: 1 }}>{selected.name}</span>
+                <span className="faint small">{selected.isPublic ? "public" : "private"}</span>
               </div>
+            </Field>
+          )}
+
+          {isConfigured(settings) && (
+            <Field label="Page list" hint="Pages are matched against tokens and scene text. The list refreshes itself every minute.">
+              <Button icon={<RefreshCw />} loading={refresh.kind === "busy"} onClick={() => void refreshPages()}>
+                Refresh page list
+              </Button>
+              {refresh.kind === "done" && <div className="small faint" style={{ marginTop: 6 }}>{refresh.message}</div>}
+              {refresh.kind === "error" && <Banner tone="danger">{refresh.message}</Banner>}
             </Field>
           )}
         </section>

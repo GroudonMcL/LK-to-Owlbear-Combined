@@ -87,11 +87,39 @@ export async function openPage(platform: Platform, list: PageList, role: Role, l
       project: list.projectId,
       resource: link.resourceId,
       name,
+      public: "1",
       ...(entry?.hidden ? { hidden: "1" } : {}),
     });
     return platform.openSidePanel(PANEL_POPOVER_ID, url, PANEL_WIDTH);
   }
   return openInTab(platform, tabUrl(role, list.projectId, link.resourceId, list.isPublic), name);
+}
+
+/**
+ * Opens a page found in a note or Text item. The GM reads it in the side
+ * panel as fetched from LegendKeeper's API, hidden pages and secrets
+ * included. Players get only LegendKeeper's public view, and only of pages in
+ * the public page list (which never holds hidden pages).
+ */
+export async function openTextMatch(platform: Platform, link: PageLink): Promise<void> {
+  const role = await platform.getRole();
+  const list = await loadPageList(platform, role);
+  if (role === "PLAYER") {
+    if (!list.isPublic) {
+      return platform.notify("This LegendKeeper project isn't public, so its pages can't be shown to players.", "WARNING");
+    }
+    return openPage(platform, list, role, link);
+  }
+  const entry = list.pages.find((page) => page.id === link.resourceId);
+  const url = extensionUrl("panel.html", {
+    project: list.projectId,
+    resource: link.resourceId,
+    name: entry?.name ?? link.name,
+    view: "content",
+    ...(entry?.hidden ? { hidden: "1" } : {}),
+    ...(list.isPublic ? { public: "1" } : {}),
+  });
+  return platform.openSidePanel(PANEL_POPOVER_ID, url, PANEL_WIDTH);
 }
 
 /** Opens a page by id, loading the page list first (for the popover's "Open page"). */

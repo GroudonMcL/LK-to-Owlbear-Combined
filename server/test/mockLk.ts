@@ -7,6 +7,9 @@ import { createCanvas } from "@napi-rs/canvas";
 
 export const PROJECT_ID = "proj_test01";
 export const API_KEY = "lk_test_key_do_not_leak_0123456789";
+/** A working key for a different project. */
+export const OTHER_API_KEY = "lk_other_project_key_0123456789";
+export const OTHER_PROJECT_ID = "proj_other";
 
 export function makePng(width: number, height: number, color = "#b0413e"): Buffer {
   const canvas = createCanvas(width, height);
@@ -229,6 +232,24 @@ export function buildFixtures(assetBase: string) {
         ],
       },
       { id: "b7", kind: "paragraph", content: runs("A large goblin, chaotic and cruel, leads the warband.") },
+      {
+        id: "b8",
+        kind: "bulletList",
+        children: [
+          {
+            id: "b9",
+            kind: "listItem",
+            children: [
+              {
+                id: "b10",
+                kind: "paragraph",
+                content: [{ text: "Serves ", bold: true }, { mention: { resourceId: "dragon", name: "Ancient Red Dragon" } }, { text: " (see ", link: "javascript:alert(1)" }, { text: "wiki", link: "https://example.com/wiki" }, { text: ")" }],
+              },
+            ],
+          },
+        ],
+      },
+      { id: "b11", kind: "secret", children: [{ id: "b12", kind: "paragraph", content: runs("Secretly a kobold.") }] },
     ],
     "dragon/d1": [
       { id: "s1", kind: "paragraph", content: runs("Gargantuan dragon, chaotic evil") },
@@ -287,6 +308,12 @@ export async function startMockLk(listenPort = 0): Promise<MockLk> {
 
     const listPath = `/api/v3/projects/${PROJECT_ID}/resources`;
     const keyless = !req.headers.authorization;
+    if (req.headers.authorization === `Bearer ${OTHER_API_KEY}`) {
+      if (pathname === "/api/v3/projects") {
+        return json(200, { data: [{ id: OTHER_PROJECT_ID, name: "Another World", isPublic: false }], hasMore: false, nextCursor: null });
+      }
+      return json(403, { message: "Wrong project", code: "WRONG_PROJECT", requestId: "r" });
+    }
     if (keyless && isPublic && pathname === listPath) {
       // A public project lists its public pages to anyone.
     } else if (req.headers.authorization !== `Bearer ${API_KEY}`) {

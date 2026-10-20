@@ -1,6 +1,8 @@
-// Per-browser settings. The connection and token defaults are the GM's; the
-// open mode is everyone's. The access token is for this extension's own
-// server; the LegendKeeper API key lives only there and never reaches a browser.
+// Per-browser settings, in localStorage only (never in the room or scene, so
+// players can't read them). The connection and token defaults are the GM's;
+// the open mode is everyone's. The GM's LegendKeeper API key is pasted here
+// and sent, per request, to this extension's server, which relays it to
+// LegendKeeper (LegendKeeper refuses calls from browser pages) without storing it.
 
 import { useEffect, useState } from "react";
 
@@ -11,7 +13,8 @@ export type OpenMode = "panel" | "tab";
 
 export interface Settings {
   backendUrl: string;
-  accessToken: string;
+  /** The GM's LegendKeeper API key. */
+  apiKey: string;
   projectId: string;
   projectName: string;
   hosting: TokenHosting;
@@ -24,7 +27,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   backendUrl: "",
-  accessToken: "",
+  apiKey: "",
   projectId: "",
   projectName: "",
   hosting: "backend",
@@ -58,7 +61,8 @@ export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return withDefaults({ ...DEFAULT_SETTINGS });
-    const parsed = JSON.parse(raw) as Partial<Settings>;
+    // Earlier versions kept an access password ("accessToken") instead of a key; it is dropped.
+    const { accessToken: _password, ...parsed } = JSON.parse(raw) as Partial<Settings> & { accessToken?: unknown };
     return withDefaults({ ...DEFAULT_SETTINGS, ...parsed });
   } catch {
     return withDefaults({ ...DEFAULT_SETTINGS });
@@ -77,7 +81,7 @@ export function saveSettings(update: Partial<Settings>): Settings {
 }
 
 export function isConfigured(s: Settings): boolean {
-  return Boolean(s.backendUrl && s.accessToken && s.projectId);
+  return Boolean(s.backendUrl && s.apiKey && s.projectId);
 }
 
 /** Settings that stay current across this frame and other frames of the extension. */

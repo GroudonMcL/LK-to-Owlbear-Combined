@@ -1,20 +1,22 @@
 // Wire contract between the backend and the extension. Only data the extension
-// needs crosses this boundary: never API keys, raw asset URLs or page bodies.
+// needs crosses this boundary: never raw asset URLs, and the API key only
+// travels from the browser to the backend, never back.
 
 import type { DetectedSize } from "./size.js";
 
 export type ErrorCode =
-  | "UNAUTHORIZED" // backend access token missing or wrong
+  | "UNAUTHORIZED" // no LegendKeeper API key sent
   | "BAD_REQUEST"
   | "NOT_FOUND" // route or entity missing on the backend
-  | "PROJECT_NOT_CONFIGURED" // no API key on the backend for this project
+  | "PROJECT_NOT_CONFIGURED" // LegendKeeper doesn't know the project
+  | "WRONG_PROJECT" // the API key opens a different project
   | "PAGE_NOT_FOUND" // LegendKeeper answered 404: deleted, hidden or no access
   | "IMAGE_NOT_FOUND" // image id is not part of this page (any more)
   | "IMAGE_UNAVAILABLE" // the image exists on the page but could not be fetched
   | "UNSUPPORTED_IMAGE" // fetched bytes are not a supported raster format
   | "PAYLOAD_TOO_LARGE"
   | "STORAGE_FULL"
-  | "UPSTREAM_AUTH" // LegendKeeper rejected the backend's key (401/402/403)
+  | "UPSTREAM_AUTH" // LegendKeeper rejected the API key (401/402/403)
   | "RATE_LIMITED"
   | "UPSTREAM_UNAVAILABLE" // network failure or 5xx talking to LegendKeeper
   | "INTERNAL";
@@ -44,10 +46,9 @@ export interface ProjectSummary {
   isPublic?: boolean;
 }
 
+/** The project the caller's API key opens (a key opens exactly one). */
 export interface ProjectsResponse {
   projects: ProjectSummary[];
-  /** Keys that could not be resolved to a project, without revealing the key. */
-  failures: { keyIndex: number; code: ErrorCode; message: string }[];
 }
 
 export interface SearchHit {

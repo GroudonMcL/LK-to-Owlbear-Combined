@@ -73,6 +73,10 @@ export const mockPlatform: Platform = {
     write(SCENE, [...read<Item[]>(SCENE, []), ...items]);
     log(`Added ${items.map((i) => i.name).join(", ")}`);
   },
+  async getSelection() {
+    const id = params.get("item");
+    return id ? [id] : [];
+  },
   async updateItems(ids, update) {
     const items = read<Item[]>(SCENE, []);
     update(items.filter((i) => ids.includes(i.id)));

@@ -12,6 +12,30 @@ function themeInfo(theme: Theme): ThemeInfo {
   };
 }
 
+/**
+ * One SDK subscription shared by every listener in this frame. The SDK's
+ * unsubscribe tells Owlbear to stop sending the event to the whole frame, so
+ * a component that unmounts would otherwise silence the others still listening.
+ */
+function shared<T>(subscribe: (cb: (value: T) => void) => () => void): (cb: (value: T) => void) => () => void {
+  const listeners = new Set<(value: T) => void>();
+  let off: (() => void) | null = null;
+  return (cb) => {
+    listeners.add(cb);
+    off ??= subscribe((value) => listeners.forEach((listener) => listener(value)));
+    return () => {
+      listeners.delete(cb);
+      if (listeners.size === 0 && off) {
+        off();
+        off = null;
+      }
+    };
+  };
+}
+
+const onItemsChange = shared<Item[]>((cb) => OBR.scene.items.onChange(cb));
+const onSceneReadyChange = shared<boolean>((cb) => OBR.scene.onReadyChange(cb));
+
 export const obrPlatform: Platform = {
   kind: "owlbear",
 
@@ -20,9 +44,9 @@ export const obrPlatform: Platform = {
   },
   getRole: () => OBR.player.getRole(),
   isSceneReady: () => OBR.scene.isReady(),
-  onSceneReadyChange: (cb) => OBR.scene.onReadyChange(cb),
+  onSceneReadyChange,
   getItems: () => OBR.scene.items.getItems(),
-  onItemsChange: (cb) => OBR.scene.items.onChange(cb),
+  onItemsChange,
   addItems: (items) => OBR.scene.items.addItems(items),
   updateItems: (ids, update) => OBR.scene.items.updateItems(ids, (drafts) => update(drafts as Item[])),
 
@@ -39,6 +63,8 @@ export const obrPlatform: Platform = {
       center: bounds.center,
     });
   },
+
+  getSelection: async () => (await OBR.player.getSelection()) ?? [],
 
   gridDpi: () => OBR.scene.grid.getDpi(),
 

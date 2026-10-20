@@ -9,28 +9,37 @@ An [Owlbear Rodeo](https://www.owlbear.rodeo) extension for campaigns kept in
 - **Token importer** (from *LegendKeeper Token Importer*): search a page, pick an image,
   crop and frame it, and the token lands in the scene with the page's title, its creature
   size and a link back to the page.
+- **Scene text links**: write a page's name in an Owlbear note or Text item and the
+  extension links it. Right-click the note for **LegendKeeper pages**, or see every page
+  the scene mentions in the toolbar popover, and click to read the page inside Owlbear.
 
-Both halves share one LegendKeeper connection, one kind of token link and one look.
+They share one LegendKeeper connection, one page list, one side panel and one look.
 
 **Nothing runs on your computer.** The extension and its small companion service are
 deployed together as one free Cloudflare Worker, straight from GitHub. You add one URL to
-Owlbear Rodeo and type one password.
+Owlbear Rodeo and paste your LegendKeeper API key into the extension's Settings.
 
-## One API key, in one place
+## Your API key stays in your browser
 
-Your LegendKeeper API key lives in exactly one place: the Worker's encrypted `LK_API_KEYS`
-secret, set by the deploy workflow from the GitHub secret of the same name. Every feature
-reads LegendKeeper through the Worker:
+The GM pastes their LegendKeeper API key into **Settings** in the extension's toolbar
+popover. It is saved in that browser's local storage only: never in the room, the scene
+or any item, so players can't see it, and never in this repository or its secrets.
+
+LegendKeeper's API refuses requests from web pages, so the browser can't call it
+directly. The extension sends the key with each request to its Worker, which passes the
+request on to LegendKeeper and answers. The Worker doesn't store or log the key; it keeps
+short-lived caches labelled with a fingerprint of the key, so one key's results are never
+shown to another.
 
 | Feature | How it reaches LegendKeeper |
 | --- | --- |
-| Importer: search, page details, images | Worker, with `LK_API_KEYS` |
-| GM's page list (Open/Link LK Page, hidden pages included) | Worker, with `LK_API_KEYS` |
+| Importer: search, page details, images | Worker, with the GM's key |
+| GM's page list (Open/Link LK Page, scene text, hidden pages included) | Worker, with the GM's key |
+| GM's page reading (scene text links, hidden pages) | Worker, with the GM's key |
 | Players' page list (public pages only) | Worker, **without** a key, as an anonymous visitor would |
 
-No browser ever holds the key. The GM's browser holds only the extension's own access
-password, and players need nothing at all. Page lists are fetched live (cached for a
-minute), so new and renamed pages show up without redeploying.
+Players need nothing at all. Page lists are fetched live (cached for a minute; **Refresh
+page list** fetches at once), so new and renamed pages show up without redeploying.
 
 ## What it does
 
@@ -54,10 +63,32 @@ minute), so new and renamed pages show up without redeploying.
 - **Editing pages.** LegendKeeper's app sends `X-Frame-Options: DENY`, so it can't be
   shown inside Owlbear, only in its own tab. A GM who wants edit mode by default should
   set **Open pages in** to **New tab**.
-- **Visibility.** The GM searches every page, with hidden ones flagged. Players search only
-  public pages, and a GM link to a hidden page tells players it isn't public. A private
-  project has no public view, so its pages open in a new tab, which works for LegendKeeper
-  members of the project.
+- **Visibility.** The GM searches every page, with hidden ones flagged, and reads hidden
+  pages in the panel through the API. Players search only public pages, and a GM link to
+  a hidden page tells players it isn't public. A private project has no public view, so
+  its pages open in a new tab, which works for LegendKeeper members of the project.
+
+### Scene text links (everyone)
+
+- **Detect after typing.** Write in Owlbear as usual, with notes and the Text tool. The
+  extension reads the text of every note and Text item in the open scene and finds the
+  names and aliases of your LegendKeeper pages in it: "Dragon" finds your *Dragon* page.
+  - Matching ignores case and works on whole words, so "dragonfly" never matches
+    *Dragon*, but "the dragon's hoard" does.
+  - The longest name wins: "Red Dragon" opens *Red Dragon*, not *Dragon*.
+  - Text is checked again whenever items are added or their text changes.
+- **Right-click** a note or Text item that names a page: **LegendKeeper pages** lists
+  them. Items that name no page don't get the entry.
+- **Toolbar popover:** the GM's **In this scene** tab (players: **Named in this scene**)
+  lists every page the scene mentions, grouped by the note or text it was found in.
+  Clicking the note's name shows it on the map.
+- **Clicking a page** opens it in the side panel:
+  - The **GM** reads the page as LegendKeeper's API returns it: hidden pages, secrets and
+    the sidebar included, with images and links to other pages (which open in place).
+    In a public project, **Public view** switches to the framed public page.
+  - **Players** match only against public pages, so hidden pages never show up for
+    them, and get only LegendKeeper's public view. In a private project, their links
+    explain that pages can't be shown to players.
 
 ### Token importer (GM)
 
@@ -101,10 +132,7 @@ its gold accent for primary actions and selection, and a serif for page titles.
 You need a LegendKeeper project on a **paid plan** (API keys require it), a free
 [Cloudflare](https://dash.cloudflare.com/sign-up) account, and this repository on GitHub.
 
-1. **LegendKeeper key.** In your project: *Project Settings → Developers → API Keys →*
-   create a key. With the *Admin* role the GM can also find and open hidden pages; with
-   *Member*, hidden pages are left out.
-2. **Cloudflare.**
+1. **Cloudflare.**
    - Your account already has a `workers.dev` subdomain: it's shown as *Your subdomain*
      on the *Workers & Pages* page (with a *Change* link). You don't need to note it; the
      deploy finds it and prints your extension URL.
@@ -112,33 +140,42 @@ You need a LegendKeeper project on a **paid plan** (API keys require it), a free
      the dashboard).
    - *My Profile → API Tokens → Create Token →* use the **Edit Cloudflare Workers**
      template, then copy the token.
-3. **Choose an access password** for the extension. Any length works. Whoever has it can
-   search and read your project through the extension (hidden pages too, with an *Admin*
-   key) and upload token images, so pick something longer if that matters to you.
-4. **GitHub secrets.** In this repository: *Settings → Secrets and variables → Actions →
+2. **GitHub secrets.** In this repository: *Settings → Secrets and variables → Actions →
    New repository secret*. Add:
 
    | Name | Value |
    | --- | --- |
    | `CLOUDFLARE_API_TOKEN` | the Cloudflare API token |
    | `CLOUDFLARE_ACCOUNT_ID` | your Cloudflare account ID |
-   | `LK_API_KEYS` | the LegendKeeper API key (comma-separate several, one per project) |
-   | `LKOB_ACCESS_TOKENS` | your access password |
 
-   A secret named `LK_API_KEY` (the name LegendKeeper Link used) is accepted in place of
-   `LK_API_KEYS`.
-5. **Deploy.** *Actions → Deploy to Cloudflare → Run workflow.* When it finishes, its
+   Your LegendKeeper key is **not** a repository secret.
+3. **Deploy.** *Actions → Deploy to Cloudflare → Run workflow.* When it finishes, its
    summary shows your extension URL, e.g.
    `https://lk-to-owlbear.<your-subdomain>.workers.dev/manifest.json`.
-6. **Owlbear Rodeo.** Open your [profile](https://owlbear.app/profile), click **Add
-   Extension** and paste that URL. Enable the extension for a room, open it from the
-   room's top-left toolbar, and enter your access password. Your project is selected
-   automatically, and the room remembers it so players' browsers know which project to
-   read.
+4. **Owlbear Rodeo.** Open your [profile](https://owlbear.app/profile), click **Add
+   Extension** and paste that URL. Enable the extension for a room.
+5. **LegendKeeper key.** In your LegendKeeper project: *Project Settings → Developers →
+   API Keys →* create a key. With the *Admin* role the GM can also find and read hidden
+   pages; with *Member*, hidden pages are left out. In Owlbear, open the extension from
+   the room's top-left toolbar, paste the key into **Settings** and press **Connect**.
+   The key's project is selected automatically, and the room remembers which project it
+   is so players' browsers know which public pages to read. Paste the key once per
+   browser you GM from; **Forget key** removes it.
 
-For the Owlbear panel and for players, the LegendKeeper project must be **public** in
-LegendKeeper. To update later, run the workflow again (it also
-runs on every push to `main`). Hosted tokens are kept across deploys.
+For the Owlbear panel's public view and for players, the LegendKeeper project must be
+**public** in LegendKeeper. To update later, run the workflow again (it also runs on every
+push to `main`). Hosted tokens are kept across deploys.
+
+### Upgrading from a version with an access password
+
+Earlier versions kept the LegendKeeper key in the Worker (`LK_API_KEYS`) behind an
+access password (`LKOB_ACCESS_TOKENS`). Neither is used any more:
+
+- Paste your API key into the extension's **Settings** (the old password is ignored).
+- Delete the `LK_API_KEYS`, `LK_API_KEY` and `LKOB_ACCESS_TOKENS` repository secrets.
+- The deploy no longer sets Worker secrets, but it doesn't remove old ones either. In the
+  Cloudflare dashboard, open the `lk-to-owlbear` Worker → *Settings → Variables and
+  Secrets* and delete `LK_API_KEYS` and `LKOB_ACCESS_TOKENS`.
 
 ### Moving from the two separate extensions
 
@@ -154,33 +191,33 @@ runs on every push to `main`). Hosted tokens are kept across deploys.
 The Cloudflare free plan covers normal use: 100,000 requests per day. Finished tokens
 are stored in Workers KV (1 GB and 1,000 new tokens per day on the free plan) and served
 from Cloudflare's cache. LegendKeeper allows 300 API requests per minute per key. A page
-open in the importer uses 1–9 of them; a page list uses one per 100 pages, at most once a
-minute per Worker instance. Page lists stop at 5,000 pages.
+open in the importer or the panel uses 2–10 of them; a page list uses one per 100 pages,
+at most once a minute per Worker instance. Page lists stop at 5,000 pages.
 
 ## How it fits together
 
 ```
  Owlbear Rodeo (GM's and players' browsers)    Cloudflare Worker (one URL)               LegendKeeper
-┌─────────────────────────────────┐          ┌─────────────────────────────────────┐ API key ┌─────────────┐
-│ popover: search, page, settings │ access   │ /*.html, /assets   extension        │───────▶ │ /api/v3/... │
-│   (players: where pages open)   │ password │ /api/...           API (GM)         │         │             │
-│ modal: token editor, link picker│─────────▶│ /api/.../images    image proxy      │───────▶ │ asset host  │
+┌─────────────────────────────────┐          ┌─────────────────────────────────────┐ GM's    ┌─────────────┐
+│ popover: search, scene text,    │ GM's key │ /*.html, /assets   extension        │ key ──▶ │ /api/v3/... │
+│   settings (key in localStorage)│ per      │ /api/...           API (GM), relays │         │             │
+│ modal: token editor, link picker│ request ▶│ /api/.../images    image proxy      │───────▶ │ asset host  │
 │ popover: LK page side panel     │          │ /api/public/...    players' page    │ no key  │             │
 │ background: context menus,      │ ─ none ─▶│                    list             │───────▶ │             │
-│   click-to-place, index         │ ◀─ blob ─│ POST /api/tokens   store token      │         └─────────────┘
+│   text matching, placing, index │ ◀─ blob ─│ POST /api/tokens   store token      │         └─────────────┘
 └─────────────────────────────────┘          │ GET /t/<sha256>    public, CORS     │ ◀── every player's browser
                                              └───────────────┬─────────────────────┘
                                                              └── Workers KV (finished tokens)
 ```
 
-LegendKeeper's API refuses requests from browser pages, and its keys must stay secret,
-so a server-side piece is unavoidable. The Worker is that piece, and it also hosts the
-extension. Code layout:
+LegendKeeper's API refuses requests from browser pages, so a server-side relay is
+unavoidable. The Worker is that relay, and it also hosts the extension. Code layout:
 
 - **`extension/`** is the Owlbear extension (Vite + React): the popover, the editor and
   picker modals, the side panel and the background page.
-  - `src/lib/` holds the logic: token links, page matching (`match.ts`), page lists,
-    opening pages (`open.ts`), the room index and token creation.
+  - `src/lib/` holds the logic: token links, page matching (`match.ts`), finding page
+    names in scene text (`textMatch.ts`), page lists, opening pages (`open.ts`), the room
+    index and token creation.
   - `src/platform/` wraps the Owlbear SDK; a mock backs local development.
   - `src/ui/` holds the shared components and the one stylesheet.
 - **`server/src/core/`** is the runtime-agnostic API: Web `Request` → `Response`, Web
@@ -188,20 +225,27 @@ extension. Code layout:
 - **`server/src/worker.ts`** is the Cloudflare entry, with the KV token store.
   **`server/src/node/`** is an optional self-hosting entry with a DNS-pinned fetcher and
   a file store (see `server/Dockerfile`).
-- **`shared/`** holds the wire types (including page lists) and the size-detection rules.
+- **`shared/`** holds the wire types (including page lists and page content) and the
+  size-detection rules.
 - **`deploy/`** holds the GitHub Actions helpers, and **`e2e/`** the Owlbear host
   emulator and end-to-end run.
 
 ## Security
 
-- LegendKeeper keys live only in the Worker's encrypted secrets, set by the deploy
-  workflow from GitHub secrets. The extension holds the separate **access password**,
-  stored in the GM's browser, and it grants only this Worker's narrow API.
-- The players' page list is the one LegendKeeper route the Worker serves without the
-  password. It is fetched from LegendKeeper **without a key**, so it holds only what
-  LegendKeeper already shows anonymous visitors, and only for projects the Worker has a key
-  for. (LegendKeeper Link published its GM page list as a public file; that list now needs
-  the password.)
+- The LegendKeeper key is kept in the GM's browser (local storage of the extension's
+  origin), never in room, scene or item metadata, never in this repository and never in
+  the Worker's settings. Anyone who can use that browser profile can read it, as with any
+  saved credential; **Forget key** removes it.
+- The extension sends the key to its own Worker over HTTPS on each request. The Worker
+  uses it for that request only and doesn't store or log it. Its caches (a minute or so)
+  are keyed by a SHA-256 fingerprint of the key, so a different key never sees another
+  key's results, and a key is only used for its own project.
+- The players' page list is the one LegendKeeper route the Worker serves without a key.
+  It is fetched from LegendKeeper **without a key**, so it holds only what LegendKeeper
+  already shows anonymous visitors. It is rate-limited per address and cached.
+- Page content shown to the GM (secrets included) only ever goes to the browser holding
+  the key. Players' links open LegendKeeper's public view, which hides hidden pages and
+  secrets.
 - The image proxy is **page-scoped**. The browser asks for `(project, page, imageId)`,
   where `imageId` is a hash of a URL the Worker itself extracted from that page. It is
   never an open proxy. Every hop must be `https:`, and private-IP literals and local names
@@ -209,14 +253,15 @@ extension. Code layout:
   to pin LegendKeeper's asset host.
 - Private page art reaches the editor as `blob:` URLs and never gets a public URL.
 - The **finished token** is the one image made public: every player's browser has to load
-  it. It is published only when the GM presses *Create token*, stored under the SHA-256 of
-  its bytes (unguessable, de-duplicated) and served with CORS. If you'd rather not, choose
-  **Owlbear storage** in Settings. Owlbear then saves the token to your own Owlbear storage,
-  and you drag it onto the map from Owlbear's Assets panel.
+  it. It is published only when the GM presses *Create token* (which needs a key
+  LegendKeeper accepts), stored under the SHA-256 of its bytes (unguessable,
+  de-duplicated) and served with CORS. If you'd rather not, choose **Owlbear storage** in
+  Settings. Owlbear then saves the token to your own Owlbear storage, and you drag it onto
+  the map from Owlbear's Assets panel.
 - Token metadata (`io.github.groudonmcl.lk-to-owlbear/link`) holds only the version,
   project and page ids, the last-known title, the link time and an import id. Room metadata
   holds the selected project's id and name, and a small index of which scenes hold linked
-  tokens.
+  tokens. Scene-text matches are worked out in each person's browser and never stored.
 
 ## Token links
 
@@ -239,7 +284,7 @@ extension. Code layout:
 
 ```sh
 npm install
-npm test                 # 253 unit/integration tests
+npm test                 # 297 unit/integration tests
 npm run typecheck
 npm run build:cloudflare && npm run e2e   # end-to-end in the Workers runtime (needs Chromium)
 ```
@@ -252,13 +297,13 @@ npm run build:cloudflare && npm run e2e   # end-to-end in the Workers runtime (n
   and the deploy helpers.
 - `npm run e2e` runs the production bundle with the real `@owlbear-rodeo/sdk`, served by
   `wrangler dev` (workerd), inside an **Owlbear host emulator** that speaks the SDK's
-  message protocol from another origin. 59 checks cover the GM's import and page-link
-  workflows and a player's. Screenshots go to `e2e/output/`. Set `CHROMIUM_PATH` to use a
+  message protocol from another origin. 99 checks cover the GM's import, page-link and
+  scene-text workflows and a player's. Screenshots go to `e2e/output/`. Set `CHROMIUM_PATH` to use a
   locally installed Chromium.
 - UI work without Owlbear: `npm run demo` (mock LegendKeeper + API on :8787) and
   `npm run dev:extension`, then open `http://localhost:5173/?mock` (add `&theme=light` or
-  `&role=player`). The player view uses the server URL you connected with as GM in the same
-browser, or `VITE_BACKEND_URL`.
+  `&role=player`), and paste the mock API key the demo prints. The player view uses the
+  server URL you connected with as GM in the same browser, or `VITE_BACKEND_URL`.
 
 See [docs/MILESTONES.md](docs/MILESTONES.md) for per-milestone status and
 [docs/API-RESEARCH.md](docs/API-RESEARCH.md) for the verified API facts behind the design.

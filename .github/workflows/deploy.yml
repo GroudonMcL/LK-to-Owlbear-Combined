@@ -1,7 +1,8 @@
 name: Deploy to Cloudflare
 
 # Run from the Actions tab ("Run workflow"), or automatically on pushes to main.
-# Needs four repository secrets; see README → Deploy.
+# Needs two repository secrets (Cloudflare); see README → Deploy. The
+# LegendKeeper API key is not a secret here: it is pasted into the extension.
 on:
   workflow_dispatch:
   push:
@@ -29,13 +30,6 @@ jobs:
       - run: npm ci
       - run: npm test
 
-      - name: Check LegendKeeper secrets
-        env:
-          LK_API_KEYS: ${{ secrets.LK_API_KEYS }}
-          LK_API_KEY: ${{ secrets.LK_API_KEY }}
-          LKOB_ACCESS_TOKENS: ${{ secrets.LKOB_ACCESS_TOKENS }}
-        run: node deploy/secrets.mjs "$RUNNER_TEMP/worker-secrets.json"
-
       - name: Prepare Cloudflare (subdomain check, token storage)
         id: prepare
         env:
@@ -50,14 +44,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
-
-      - name: Store LegendKeeper secrets in the Worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          npx wrangler secret bulk "$RUNNER_TEMP/worker-secrets.json"
-          rm -f "$RUNNER_TEMP/worker-secrets.json"
 
       - name: Check the deployment
         run: |
@@ -76,5 +62,5 @@ jobs:
             echo "$base/manifest.json"
             echo '```'
             echo ""
-            echo "Enable it for a room, open it from the room's top-left toolbar and enter your LKOB_ACCESS_TOKENS value."
+            echo "Enable it for a room, open it from the room's top-left toolbar and paste your LegendKeeper API key into Settings."
           } >> "$GITHUB_STEP_SUMMARY"

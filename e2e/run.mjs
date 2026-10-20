@@ -1,4 +1,5 @@
-// End-to-end test of the deployable artefact (importer, page links, players):
+// End-to-end test of the deployable artefact (importer, page links, scene-text
+// links, players):
 //   production extension bundle + real @owlbear-rodeo/sdk
 //   served by the real Cloudflare Workers runtime (wrangler dev / workerd)
 //   inside an Owlbear host emulator on another origin,
@@ -21,7 +22,7 @@ const WORKER = "http://127.0.0.1:8787";
 const HOST = "http://127.0.0.1:4800";
 const NS = "io.github.groudonmcl.lk-to-owlbear";
 const PIXEL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
-const TOKEN = "e2e-access-token-0123456789abcdef";
+const API_KEY = "lk_test_key_do_not_leak_0123456789";
 const children = [];
 const failures = [];
 let passed = 0;
@@ -78,9 +79,8 @@ function serveHost() {
 
 async function main() {
   run("npx", ["tsx", "server/test/mockLkServer.ts"], { MOCK_LK_PORT: "8790", MOCK_LK_PUBLIC: "1" });
+  // No LegendKeeper secrets: the GM pastes the key into the extension.
   const vars = {
-    LK_API_KEYS: "lk_test_key_do_not_leak_0123456789",
-    LKOB_ACCESS_TOKENS: TOKEN,
     LK_BASE_URL: "http://127.0.0.1:8790",
     LKOB_INSECURE_ASSET_FETCH: "1",
   };
@@ -140,16 +140,22 @@ async function main() {
   const pop = page.frameLocator("#popover");
 
   console.log("Connect, project, search, page, images");
-  await pop.getByLabel("Access password").waitFor();
+  await pop.getByLabel("LegendKeeper API key").waitFor();
   check("server URL is implicit (same-origin build)", (await pop.getByLabel("Server URL").isVisible()) === false);
-  await pop.getByLabel("Access password").fill("wrong-token-wrong-token-wrong");
+  await pop.getByLabel("LegendKeeper API key").fill("lk_wrong_key_0000000000");
   await pop.getByRole("button", { name: "Connect" }).click();
   await pop.getByText("Connection failed").waitFor();
-  check("a wrong access token is reported", true);
-  await pop.getByLabel("Access password").fill(TOKEN);
+  check("a key LegendKeeper refuses is reported", (await pop.getByText("didn't accept your API key").count()) === 1);
+  await pop.getByLabel("LegendKeeper API key").fill(API_KEY);
   await pop.getByRole("button", { name: "Connect" }).click();
   await pop.getByRole("main").getByText("The Test Realm").waitFor();
-  check("project resolved from the server's key and auto-selected", await pop.getByRole("radio").isChecked());
+  check("the key's project is selected automatically", true);
+  const extOrigin = () => page.frames().find((f) => f.url().startsWith(WORKER));
+  const savedKey = await extOrigin().evaluate(() => JSON.parse(localStorage.getItem("lkob.settings.v1") ?? "{}").apiKey);
+  check("the API key is kept in this browser's storage", savedKey === API_KEY);
+  await pop.getByRole("button", { name: "Refresh page list" }).click();
+  await pop.getByText(/pages loaded/).waitFor();
+  check("Refresh page list reloads the list", true);
   await shot("01-settings-connected");
   await pop.getByRole("button", { name: "Done" }).click();
   await pop.getByLabel("Search LegendKeeper pages").fill("goblin");
@@ -384,8 +390,8 @@ async function main() {
   await host(() => window.host.clickContextMenu(`${window.NS}/open`, ["queen"]));
   await page.waitForFunction((ns) => window.host.state.popovers[`${ns}/panel`]?.el.src.includes("resource=villain"), NS, { timeout: 10_000 });
   check("a token's label matches a page alias (hidden page included for the GM)", true);
-  await panelFrame.getByText("This page is hidden").waitFor();
-  check("a hidden page explains that the public view can't show it", true);
+  await panelFrame.getByText("Hidden from players").waitFor();
+  check("the GM reads a hidden page through the API, since the public view can't show it", (await panelFrame.locator("iframe.lk-frame").count()) === 0);
 
   await host((item) => window.host.addItem(item), plain("mystery", "token-08.png", ""));
   await host(() => window.host.clickContextMenu(`${window.NS}/link`, ["mystery"]));
@@ -406,6 +412,61 @@ async function main() {
   await page.waitForTimeout(800);
   check("the linked token now opens its page directly", !(await host(() => window.host.modals()))[`${NS}/picker`]);
 
+  console.log("Scene text: notes and Text items that name pages");
+  const textItem = (id, text, extra = {}) => ({
+    id, type: "TEXT", name: "Text", layer: "TEXT", visible: true, locked: false, metadata: {}, position: { x: 0, y: 0 }, rotation: 0, scale: { x: 1, y: 1 },
+    text: { type: "PLAIN", plainText: text, richText: [], style: {} }, textItemType: "TEXT", ...extra,
+  });
+  const note = textItem("note-1", "", {
+    type: "IMAGE", layer: "NOTE", name: "Note",
+    image: { url: PIXEL, width: 100, height: 100, mime: "image/png" }, grid: { dpi: 100, offset: { x: 50, y: 50 } },
+    text: { type: "RICH", plainText: "", style: {}, richText: [{ type: "paragraph", children: [{ text: "Rumour: " }, { text: "the Hollow Queen", bold: true }, { text: " hides in Millbrook." }] }] },
+  });
+  await host((item) => window.host.addItem(item), textItem("text-1", "An ANCIENT RED DRAGON circles the hills above millbrookery."));
+  await host((item) => window.host.addItem(item), note);
+  await host((item) => window.host.addItem(item), textItem("text-2", "Nothing to see here"));
+  const textMenu = `${NS}/text-pages`;
+  await page.waitForFunction((id) => window.host.state.contextMenus[id], textMenu, { timeout: 10_000 });
+  const menuLabels = async (id) => (await host((i) => window.host.contextMenusFor([i]), id)).map((m) => m.label);
+  check("notes and Text items that name a page get the LegendKeeper pages menu", (await menuLabels("text-1")).includes("LegendKeeper pages") && (await menuLabels("note-1")).includes("LegendKeeper pages"));
+  check("text without page names doesn't", !(await menuLabels("text-2")).includes("LegendKeeper pages"));
+  check("tokens don't get the text menu", !(await menuLabels("queen")).includes("LegendKeeper pages"));
+  await host(({ id, item }) => window.host.openContextMenuEmbed(id, [item]), { id: textMenu, item: "note-1" });
+  const embed = page.frameLocator(`iframe[data-embed="${textMenu}"]`);
+  await embed.getByText("Mordrith").waitFor();
+  const embedText = await embed.locator(".embed-body").innerText();
+  check("the menu lists the note's pages, matched on an alias, hidden flagged", embedText.includes("Millbrook") && (await embed.locator(".badge.warn").count()) === 1 && !embedText.includes("Dragon"), embedText);
+  await shot("09-text-menu");
+  await embed.getByRole("button", { name: /Millbrook/ }).click();
+  await page.waitForFunction((ns) => window.host.state.popovers[`${ns}/panel`]?.el.src.includes("resource=village"), NS, { timeout: 10_000 });
+  await panelFrame.getByText("A large village by the river.").waitFor();
+  check("clicking a matched page shows its content from the API in an Owlbear popover", (await panelFrame.locator("iframe.lk-frame").count()) === 0);
+  await panelFrame.getByRole("button", { name: "Public view" }).click();
+  check("the GM can switch to the public view", (await panelFrame.locator("iframe.lk-frame").getAttribute("src")) === "https://www.legendkeeper.com/p/proj_test01/village/");
+
+  if (await pop.getByLabel("Back to search").isVisible()) await pop.getByLabel("Back to search").click();
+  await pop.getByRole("button", { name: /In this scene \(3\)/ }).click();
+  await pop.getByText("An ANCIENT RED DRAGON circles").waitFor();
+  const groups = await pop.locator(".text-group").allInnerTexts();
+  check("the popover lists every matched page, grouped by item", groups.length === 2 && groups[0].includes("Ancient Red Dragon") && groups[1].includes("Mordrith") && groups[1].includes("Millbrook"), JSON.stringify(groups));
+  check("whole words only: 'millbrookery' doesn't match", !groups[0].includes("Millbrook"));
+  await shot("10-scene-text");
+  await pop.locator(".text-link", { hasText: "Ancient Red Dragon" }).click();
+  await page.waitForFunction((ns) => window.host.state.popovers[`${ns}/panel`]?.el.src.includes("resource=dragon"), NS, { timeout: 10_000 });
+  await panelFrame.getByText("Gargantuan dragon, chaotic evil").waitFor();
+  check("the GM sees secrets in the API view", (await panelFrame.locator(".lk-box-secret").count()) === 1);
+  await shot("11-content-panel");
+  await pop.locator(".text-group-head button", { hasText: "Rumour" }).click();
+  check("clicking an item's name selects it on the map", (await host(() => window.host.state.selection)).includes("note-1"));
+  await host(() => window.host.deleteItems(["text-2"]));
+  await host((item) => window.host.addItem(item), textItem("text-2", "Goblin Boss was here"));
+  await page.waitForFunction(() => window.host.contextMenusFor(["text-2"]).some((m) => m.label === "LegendKeeper pages"), null, { timeout: 10_000 });
+  check("changed text is re-checked automatically", true);
+  await pop.getByText("Goblin Boss was here").waitFor();
+  check("the popover follows the change", true);
+  state = await host(() => window.host.state);
+  check("the API key never reaches the room or scene", !JSON.stringify([state.roomMeta, state.sceneMeta, state.items]).includes(API_KEY));
+
   console.log("Players");
   const linkedVillain = { ...plain("villain-token", "Mordrith", "Mordrith"), metadata: { [`${NS}/link`]: { v: 1, projectId: "proj_test01", resourceId: "villain", title: "Mordrith", linkedAt: "", importId: "" } } };
   const player = await context.newPage();
@@ -414,12 +475,18 @@ async function main() {
   await player.evaluate(({ ns, items }) => {
     window.host.state.roomMeta[`${ns}/project`] = { id: "proj_test01", name: "The Test Realm" };
     window.host.state.items.push(...items);
-  }, { ns: NS, items: [plain("goblin-token", "goblin.png", "Goblin Boss"), linkedVillain, plain("other", "token-09.png", "")] });
+  }, { ns: NS, items: [plain("goblin-token", "goblin.png", "Goblin Boss"), linkedVillain, plain("other", "token-09.png", ""), textItem("p-text", "Ancient Red Dragon and The Hollow Queen")] });
   await player.evaluate(() => window.host.boot());
   const playerPop = player.frameLocator("#popover");
   await playerPop.getByText("public pages").waitFor();
   check("players get the page-opening view, not the importer", (await playerPop.getByText("Choose artwork").count()) === 0 && (await playerPop.getByRole("button", { name: "Owlbear panel" }).isVisible()));
+  await playerPop.locator(".text-link", { hasText: "Ancient Red Dragon" }).waitFor();
+  check("players see public pages named in the scene, never hidden ones", (await playerPop.locator(".text-link", { hasText: "Mordrith" }).count()) === 0);
   await player.screenshot({ path: path.join(OUT, "08-player-popover.png") });
+  const playerTextMenu = await player
+    .waitForFunction(() => window.host.contextMenusFor(["p-text"]).some((m) => m.label === "LegendKeeper pages"), null, { timeout: 10_000 })
+    .then(() => true, () => false);
+  check("players get the text menu too", playerTextMenu);
   const playerMenus = await player.evaluate(() => window.host.contextMenusFor(["villain-token"]));
   check("players get Open and Link, never Token Art", playerMenus.map((m) => m.label).sort().join("|") === "Link LK Page…|Open LK Page", JSON.stringify(playerMenus));
   await player.evaluate((ns) => window.host.clickContextMenu(`${ns}/open`, ["villain-token"]), NS);
@@ -442,6 +509,15 @@ async function main() {
   const stored = await extFrame.evaluate((ns) => JSON.parse(localStorage.getItem(`${ns}/player-links/e2e-room`) ?? "{}"), NS);
   const otherItem = await player.evaluate(() => window.host.state.items.find((i) => i.id === "other"));
   check("a player's link stays in their browser, not on the token", stored.other?.resourceId === "dragon" && !otherItem.metadata[`${NS}/link`], JSON.stringify(stored));
+  await playerPop.locator(".text-link", { hasText: "Ancient Red Dragon" }).click();
+  await player.waitForFunction((ns) => window.host.state.popovers[`${ns}/panel`]?.el.src.includes("resource=dragon") && !window.host.state.popovers[`${ns}/panel`]?.el.src.includes("view="), NS, { timeout: 10_000 });
+  const playerTextPanel = player.frameLocator('iframe[data-popover$="/panel"]');
+  await playerTextPanel.locator("iframe.lk-frame").waitFor();
+  check(
+    "a player's text link opens only the public view",
+    (await playerTextPanel.locator("iframe.lk-frame").getAttribute("src")) === "https://www.legendkeeper.com/p/proj_test01/dragon/" &&
+      (await playerTextPanel.getByRole("button", { name: "Full page (GM)" }).count()) === 0,
+  );
   const playerState = await player.evaluate(() => window.host.state);
   check("player: every SDK call handled and none failed", playerState.unhandled.length === 0 && playerState.errors.length === 0, JSON.stringify([playerState.unhandled, playerState.errors]));
 

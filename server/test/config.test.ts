@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "../src/core/config.js";
 
-describe("loadConfig access passwords", () => {
-  it("accepts short passwords, several separated by commas", () => {
-    expect(loadConfig({ LK_API_KEYS: "k", LKOB_ACCESS_TOKENS: "goblin, owlbear" }).accessTokens).toEqual(["goblin", "owlbear"]);
+describe("loadConfig", () => {
+  it("needs no secrets: the API key comes from the extension", () => {
+    const config = loadConfig({});
+    expect(config.lkBaseUrl).toBe("https://www.legendkeeper.com");
+    expect(config.allowedOrigins).toBe("*");
+    expect(config).not.toHaveProperty("lkApiKeys");
+    expect(config).not.toHaveProperty("accessTokens");
   });
 
-  it("requires at least one", () => {
-    expect(() => loadConfig({ LK_API_KEYS: "k", LKOB_ACCESS_TOKENS: " " })).toThrow(ConfigError);
+  it("rejects malformed numbers", () => {
+    expect(() => loadConfig({ LKOB_RATE_LIMIT_PER_MINUTE: "lots" })).toThrow(ConfigError);
   });
 });

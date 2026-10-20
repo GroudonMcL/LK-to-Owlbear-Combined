@@ -158,6 +158,7 @@
   const handlers = {
     OBR_PLAYER_GET_ROLE: () => ({ role: state.role }),
     OBR_PLAYER_GET_ID: () => ({ id: USER }),
+    OBR_PLAYER_GET_SELECTION: () => ({ selection: state.selection }),
     OBR_PLAYER_SELECT: (_f, d) => {
       state.selection = d.replace === false ? [...state.selection, ...d.items] : d.items;
       return {};
@@ -281,7 +282,7 @@
       return {};
     },
     OBR_CONTEXT_MENU_CREATE: (from, d) => {
-      state.contextMenus[d.id] = { frame: from, icons: d.icons };
+      state.contextMenus[d.id] = { frame: from, icons: d.icons, embed: d.embed };
       return {};
     },
     OBR_CONTEXT_MENU_REMOVE: (_f, d) => {
@@ -474,7 +475,20 @@
       const items = state.items.filter((i) => itemIds.includes(i.id));
       return Object.entries(state.contextMenus)
         .filter(([, m]) => m.icons.some((icon) => menuApplies(icon, items)))
-        .map(([id, m]) => ({ id, label: m.icons.find((icon) => menuApplies(icon, items)).label, icon: m.icons[0].icon }));
+        .map(([id, m]) => ({ id, label: m.icons.find((icon) => menuApplies(icon, items)).label, icon: m.icons[0].icon, embed: m.embed }));
+    },
+    /** Opens a context menu item's embed for these (selected) items, as Owlbear shows it inside the menu. */
+    openContextMenuEmbed(menuId, itemIds) {
+      state.selection = [...itemIds];
+      const menu = state.contextMenus[menuId];
+      document.querySelector("iframe.menu-embed")?.remove();
+      const el = document.createElement("iframe");
+      el.className = "menu-embed";
+      el.dataset.embed = menuId;
+      el.style.width = "240px";
+      el.style.height = `${menu.embed.height ?? 100}px`;
+      document.body.appendChild(el);
+      loadFrame(`embed:${menuId}`, menu.embed.url, el);
     },
     clickContextMenu(menuId, itemIds) {
       const items = state.items.filter((i) => itemIds.includes(i.id));

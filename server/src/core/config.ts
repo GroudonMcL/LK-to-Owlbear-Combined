@@ -1,12 +1,8 @@
 export interface Config {
   host: string;
   port: number;
-  /** Bearer tokens accepted from the extension. Not LegendKeeper keys. */
-  accessTokens: string[];
-  /** One LegendKeeper API key per project. */
-  lkApiKeys: string[];
   lkBaseUrl: string;
-  /** Origins allowed to call /api, or "*" for any (the access token still applies). */
+  /** Origins allowed to call /api, or "*" for any (an API key is still required). */
   allowedOrigins: string[] | "*";
   /** Public URL of this server, used to build token image URLs. */
   publicBaseUrl: string | null;
@@ -21,7 +17,7 @@ export interface Config {
   assetHostAllowlist: string[] | null;
   /** Test-only: permit http:// and private addresses for image fetches. */
   allowInsecureAssetFetch: boolean;
-  /** Requests per minute per access token. */
+  /** Requests per minute per API key (and per address, for keyless routes). */
   rateLimitPerMinute: number;
 }
 
@@ -44,14 +40,6 @@ function positiveNumber(value: string | undefined, fallback: number, name: strin
 export type Env = Record<string, string | undefined>;
 
 export function loadConfig(env: Env): Config {
-  const accessTokens = list(env.LKOB_ACCESS_TOKENS);
-  if (accessTokens.length === 0) {
-    throw new ConfigError("LKOB_ACCESS_TOKENS is required (one password, or several separated by commas)");
-  }
-
-  const lkApiKeys = list(env.LK_API_KEYS);
-  if (lkApiKeys.length === 0) throw new ConfigError("LK_API_KEYS is required (one LegendKeeper API key per project)");
-
   const origins = list(env.LKOB_ALLOWED_ORIGINS);
   const allowedOrigins = origins.length === 0 || origins.includes("*") ? "*" : origins.map((o) => o.replace(/\/$/, ""));
 
@@ -68,8 +56,6 @@ export function loadConfig(env: Env): Config {
   return {
     host: env.HOST || "0.0.0.0",
     port: positiveNumber(env.PORT, 8787, "PORT"),
-    accessTokens,
-    lkApiKeys,
     lkBaseUrl,
     allowedOrigins,
     publicBaseUrl,

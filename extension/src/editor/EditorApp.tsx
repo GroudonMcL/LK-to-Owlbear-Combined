@@ -42,8 +42,8 @@ export function EditorApp({ platform }: { platform: Platform }) {
   const projectId = params.get("p") ?? "";
   const resourceId = params.get("r") ?? "";
   const api = useMemo(
-    () => (settings.backendUrl && settings.accessToken ? new ApiClient(settings) : null),
-    [settings.backendUrl, settings.accessToken],
+    () => (settings.backendUrl && settings.apiKey ? new ApiClient(settings) : null),
+    [settings.backendUrl, settings.apiKey],
   );
 
   const [page, setPage] = useState<PageDetails | null>(null);

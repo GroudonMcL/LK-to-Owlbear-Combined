@@ -5,15 +5,19 @@ import type { HealthResponse, TokenUploadResponse } from "@lkob/shared";
 import type { Config } from "./config.js";
 import { badRequest, HttpError } from "./errors.js";
 import { readDimensions, sniffImageMime } from "./imageSniff.js";
-import type { PageService, ProjectRegistry } from "./services.js";
+import { TtlCache } from "./cache.js";
+import { LkClient } from "./lk/client.js";
+import type { Caller, PageService, ProjectResolver } from "./services.js";
 import { sha256Hex, StoreFullError, type TokenStore } from "./tokenStore.js";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
 
 export interface HandlerDeps {
   config: Config;
-  registry: ProjectRegistry;
+  projects: ProjectResolver;
   pages: PageService;
+  /** Builds a LegendKeeper client for an API key (tests pass a fake fetch). */
+  makeClient?: (apiKey: string) => LkClient;
   tokens: TokenStore | null;
   log?: (message: string) => void;
 }
@@ -43,12 +47,8 @@ class RateLimiter {
   }
 }
 
-/** Equal-length hex digests compared without an early exit. */
-function digestsEqual(a: string, b: string): boolean {
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < Math.max(a.length, b.length); i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  return diff === 0;
-}
+/** LegendKeeper keys are opaque; this only rules out junk before calling LegendKeeper. */
+const API_KEY_PATTERN = /^[\x21-\x7e]{8,512}$/;
 
 function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -86,9 +86,10 @@ async function readBody(request: Request, maxBytes: number): Promise<Uint8Array>
 }
 
 export function createHandler(deps: HandlerDeps): (request: Request) => Promise<Response> {
-  const { config, registry, pages, tokens } = deps;
+  const { config, projects, pages, tokens } = deps;
   const log = deps.log ?? ((m: string) => console.log(m));
-  const tokenDigests = Promise.all(config.accessTokens.map((t) => sha256Hex(t)));
+  const makeClient = deps.makeClient ?? ((apiKey: string) => new LkClient({ baseUrl: config.lkBaseUrl, apiKey }));
+  const clients = new TtlCache<string, LkClient>({ ttlMs: 30 * 60_000, maxEntries: 200 });
   const limiter = new RateLimiter(config.rateLimitPerMinute);
 
   function corsHeaders(request: Request): Record<string, string> {
@@ -105,14 +106,30 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
     return headers;
   }
 
-  /** Returns a rate-limit key for a valid token; throws otherwise. */
-  async function authenticate(request: Request): Promise<string> {
+  /**
+   * The caller's LegendKeeper API key, sent by the extension on each request
+   * and used for that request only. It is never stored or logged; caches are
+   * keyed by its digest. LegendKeeper itself decides whether the key is good.
+   */
+  async function authenticate(request: Request): Promise<Caller> {
     const match = /^Bearer\s+(.+)$/i.exec(request.headers.get("authorization") ?? "");
-    if (!match) throw new HttpError(401, "UNAUTHORIZED", "Missing access token. Add it in the extension settings.");
-    const candidate = await sha256Hex(match[1].trim());
-    const index = (await tokenDigests).findIndex((d) => digestsEqual(d, candidate));
-    if (index < 0) throw new HttpError(401, "UNAUTHORIZED", "The access token was not accepted by the server.");
-    return `t${index}`;
+    const apiKey = match?.[1].trim() ?? "";
+    if (!apiKey) throw new HttpError(401, "UNAUTHORIZED", "Add your LegendKeeper API key in the extension's settings.");
+    if (!API_KEY_PATTERN.test(apiKey)) throw new HttpError(401, "UNAUTHORIZED", "That doesn't look like a LegendKeeper API key.");
+    const keyId = (await sha256Hex(apiKey)).slice(0, 32);
+    let client = clients.get(keyId);
+    if (!client) {
+      client = makeClient(apiKey);
+      clients.set(keyId, client);
+    }
+    return { keyId, client };
+  }
+
+  function rateLimit(key: string): void {
+    const wait = limiter.check(key);
+    if (wait !== null) {
+      throw new HttpError(429, "RATE_LIMITED", "Too many requests. Slow down a little.", { retryable: true, retryAfter: wait });
+    }
   }
 
   function tokenUrl(request: Request, fileName: string): string {
@@ -166,18 +183,16 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
     // holds only what LegendKeeper shows anonymous visitors anyway.
     if (parts[1] === "public" && parts[2] === "projects" && parts[4] === "page-list" && parts.length === 5 && method === "GET") {
       if (!ID_PATTERN.test(parts[3])) throw badRequest("Invalid project id.");
-      return json(200, await pages.pageList(parts[3], "public"), cors);
+      rateLimit(`ip:${request.headers.get("cf-connecting-ip") ?? "local"}`);
+      return json(200, await pages.publicPageList(parts[3]), cors);
     }
 
-    const rateKey = await authenticate(request);
-    const wait = limiter.check(rateKey);
-    if (wait !== null) {
-      throw new HttpError(429, "RATE_LIMITED", "Too many requests. Slow down a little.", { retryable: true, retryAfter: wait });
-    }
+    const caller = await authenticate(request);
+    rateLimit(`key:${caller.keyId}`);
 
-    // GET /api/projects
+    // GET /api/projects[?refresh=1]: the project the key opens.
     if (parts[1] === "projects" && parts.length === 2 && method === "GET") {
-      return json(200, await registry.list(url.searchParams.get("refresh") === "1"), cors);
+      return json(200, await projects.list(caller, url.searchParams.get("refresh") === "1"), cors);
     }
 
     if (parts[1] === "projects" && parts.length >= 4) {
@@ -186,7 +201,7 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
 
       // GET /api/projects/:projectId/page-list[?fresh=1]: the GM's page list, hidden pages included.
       if (parts[3] === "page-list" && parts.length === 4 && method === "GET") {
-        return json(200, await pages.pageList(projectId, "gm", url.searchParams.get("fresh") === "1"), cors);
+        return json(200, await pages.pageList(caller, projectId, url.searchParams.get("fresh") === "1"), cors);
       }
 
       // GET /api/projects/:projectId/search?q=&limit=
@@ -195,7 +210,7 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
         if (q.length > MAX_QUERY_LENGTH) throw badRequest("Search text is too long.");
         const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit")) || 25));
         if (!q) return json(200, { query: "", results: [], limited: false }, cors);
-        return json(200, await pages.search(projectId, q, limit), cors);
+        return json(200, await pages.search(caller, projectId, q, limit), cors);
       }
 
       if (parts[3] === "pages" && parts.length >= 5) {
@@ -204,15 +219,21 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
 
         // GET /api/projects/:projectId/pages/:resourceId
         if (parts.length === 5 && method === "GET") {
-          const page = await pages.getPage(projectId, resourceId, url.searchParams.get("fresh") === "1");
+          const page = await pages.getPage(caller, projectId, resourceId, url.searchParams.get("fresh") === "1");
           return json(200, page.details, cors);
+        }
+
+        // GET /api/projects/:projectId/pages/:resourceId/content: the page to read.
+        if (parts[5] === "content" && parts.length === 6 && method === "GET") {
+          const page = await pages.getPage(caller, projectId, resourceId, url.searchParams.get("fresh") === "1");
+          return json(200, page.content, cors);
         }
 
         // GET /api/projects/:projectId/pages/:resourceId/images/:imageId
         if (parts[5] === "images" && parts.length === 7 && method === "GET") {
           const imageId = parts[6];
           if (!IMAGE_ID_PATTERN.test(imageId)) throw badRequest("Invalid image id.");
-          const image = await pages.getImage(projectId, resourceId, imageId);
+          const image = await pages.getImage(caller, projectId, resourceId, imageId);
           return new Response(image.body, {
             status: 200,
             headers: {
@@ -230,6 +251,8 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
 
     if (parts[1] === "tokens") {
       if (!tokens) throw new HttpError(404, "NOT_FOUND", "Token hosting is turned off on this server.");
+      // Only someone with a working LegendKeeper key may store or delete tokens.
+      await projects.projectOf(caller);
 
       // POST /api/tokens  (body: PNG or WebP bytes)
       if (parts.length === 2 && method === "POST") {

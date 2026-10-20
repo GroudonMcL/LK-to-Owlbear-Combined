@@ -155,7 +155,7 @@ export function SearchView({
             }
           >
             {describeError(state.error)}
-            {state.error instanceof ApiError && state.error.code === "UNAUTHORIZED" && " Check the access token in Settings."}
+            {state.error instanceof ApiError && state.error.code === "UNAUTHORIZED" && " Check the API key in Settings."}
           </Banner>
         )}
 
