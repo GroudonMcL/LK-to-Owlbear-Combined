@@ -4,8 +4,8 @@ import type {
   HealthResponse,
   PageContent,
   PageDetails,
-  PageList,
   ProjectsResponse,
+  ResourceChunk,
   SearchResponse,
   TokenUploadResponse,
 } from "@lkob/shared";
@@ -30,6 +30,8 @@ export function isAbort(err: unknown): boolean {
 }
 
 const TIMEOUT_MS = 20_000;
+/** A page-list chunk is up to 15 LegendKeeper calls made one after another. */
+const CHUNK_TIMEOUT_MS = 60_000;
 
 export class ApiClient {
   private readonly base: string;
@@ -38,8 +40,8 @@ export class ApiClient {
     this.base = settings.backendUrl.replace(/\/+$/, "");
   }
 
-  private async request(path: string, init: RequestInit = {}, signal?: AbortSignal, auth = true): Promise<Response> {
-    const timeout = AbortSignal.timeout(TIMEOUT_MS);
+  private async request(path: string, init: RequestInit = {}, signal?: AbortSignal, auth = true, timeoutMs = TIMEOUT_MS): Promise<Response> {
+    const timeout = AbortSignal.timeout(timeoutMs);
     const combined = signal ? anySignal([signal, timeout]) : timeout;
     let response: Response;
     try {
@@ -124,15 +126,18 @@ export class ApiClient {
     );
   }
 
-  /** Every page of the project, hidden ones included (needs the API key). */
-  pageList(projectId: string, fresh = false): Promise<PageList> {
-    return this.json(`/api/projects/${encodeURIComponent(projectId)}/page-list${fresh ? "?fresh=1" : ""}`);
+  /** A slice of the project's pages, hidden ones included (needs the API key). Follow `nextCursor`. */
+  async resourceChunk(projectId: string, cursor: string, fresh = false): Promise<ResourceChunk> {
+    const q = new URLSearchParams({ cursor, ...(fresh ? { fresh: "1" } : {}) });
+    const res = await this.request(`/api/projects/${encodeURIComponent(projectId)}/resources?${q}`, {}, undefined, true, CHUNK_TIMEOUT_MS);
+    return (await res.json()) as ResourceChunk;
   }
 
-  /** The project's public pages; open to players, who have no API key. */
-  async publicPageList(projectId: string): Promise<PageList> {
-    const res = await this.request(`/api/public/projects/${encodeURIComponent(projectId)}/page-list`, {}, undefined, false);
-    return (await res.json()) as PageList;
+  /** A slice of the project's public pages; open to players, who have no API key. */
+  async publicResourceChunk(projectId: string, cursor: string): Promise<ResourceChunk> {
+    const q = new URLSearchParams({ cursor });
+    const res = await this.request(`/api/public/projects/${encodeURIComponent(projectId)}/resources?${q}`, {}, undefined, false, CHUNK_TIMEOUT_MS);
+    return (await res.json()) as ResourceChunk;
   }
 
   async imageBlob(projectId: string, resourceId: string, imageId: string, signal?: AbortSignal): Promise<Blob> {

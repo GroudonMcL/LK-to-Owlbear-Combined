@@ -137,6 +137,12 @@ export const mockPlatform: Platform = {
     target.searchParams.set("mock", "1");
     mockFrame(`mock-${id}`, target.href, { right: "8px", top: "8px", bottom: "8px", width: `${maxWidth}px` });
   },
+  async resizeSidePanel(id, width) {
+    const next = Math.round(Math.min(window.top!.innerWidth - 16, Math.max(320, width)));
+    const frame = window.top!.document.getElementById(`mock-${id}`);
+    if (frame) frame.style.width = `${next}px`;
+    return next;
+  },
   async closeSidePanel(id) {
     window.top!.document.getElementById(`mock-${id}`)?.remove();
   },

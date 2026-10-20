@@ -148,14 +148,16 @@ async function main() {
   check("a key LegendKeeper refuses is reported", (await pop.getByText("didn't accept your API key").count()) === 1);
   await pop.getByLabel("LegendKeeper API key").fill(API_KEY);
   await pop.getByRole("button", { name: "Connect" }).click();
-  await pop.getByRole("main").getByText("The Test Realm").waitFor();
+  await pop.getByRole("main").getByText("The Test Realm", { exact: true }).waitFor();
   check("the key's project is selected automatically", true);
   const extOrigin = () => page.frames().find((f) => f.url().startsWith(WORKER));
   const savedKey = await extOrigin().evaluate(() => JSON.parse(localStorage.getItem("lkob.settings.v1") ?? "{}").apiKey);
   check("the API key is kept in this browser's storage", savedKey === API_KEY);
+  await pop.getByText("The Test Realm: 7 pages, updated just now").waitFor();
+  check("connecting loads the page list and says so", true);
   await pop.getByRole("button", { name: "Refresh page list" }).click();
-  await pop.getByText(/pages loaded/).waitFor();
-  check("Refresh page list reloads the list", true);
+  await pop.getByText("The Test Realm: 7 pages, updated just now").waitFor();
+  check("then how many pages it has and when it was updated", true);
   await shot("01-settings-connected");
   await pop.getByRole("button", { name: "Done" }).click();
   await pop.getByLabel("Search LegendKeeper pages").fill("goblin");
@@ -439,10 +441,21 @@ async function main() {
   await shot("09-text-menu");
   await embed.getByRole("button", { name: /Millbrook/ }).click();
   await page.waitForFunction((ns) => window.host.state.popovers[`${ns}/panel`]?.el.src.includes("resource=village"), NS, { timeout: 10_000 });
-  await panelFrame.getByText("A large village by the river.").waitFor();
-  check("clicking a matched page shows its content from the API in an Owlbear popover", (await panelFrame.locator("iframe.lk-frame").count()) === 0);
-  await panelFrame.getByRole("button", { name: "Public view" }).click();
-  check("the GM can switch to the public view", (await panelFrame.locator("iframe.lk-frame").getAttribute("src")) === "https://www.legendkeeper.com/p/proj_test01/village/");
+  await panelFrame.locator("iframe.lk-frame").waitFor();
+  check("a text link opens the LegendKeeper page in the side panel, as Open LK Page does", (await panelFrame.locator("iframe.lk-frame").getAttribute("src")) === "https://www.legendkeeper.com/p/proj_test01/village/");
+
+  // Drag the panel's left edge 200 px to the left: it widens.
+  const panelBox = await page.locator('iframe[data-popover$="/panel"]').boundingBox();
+  const widthBefore = (await host(() => window.host.popovers()))[`${NS}/panel`].options.width;
+  await page.mouse.move(panelBox.x + 3, panelBox.y + panelBox.height / 2);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i++) await page.mouse.move(panelBox.x + 3 - i * 20, panelBox.y + panelBox.height / 2);
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const widthAfter = (await host(() => window.host.popovers()))[`${NS}/panel`].options.width;
+  check("dragging the panel's left edge resizes it", widthAfter >= widthBefore + 150, `${widthBefore} → ${widthAfter}`);
+  const savedWidth = await extOrigin().evaluate(() => Number(localStorage.getItem("lkob.panel-width.v1")));
+  check("the panel remembers its width", savedWidth === widthAfter, `${savedWidth}`);
 
   if (await pop.getByLabel("Back to search").isVisible()) await pop.getByLabel("Back to search").click();
   await pop.getByRole("button", { name: /In this scene \(3\)/ }).click();
@@ -453,8 +466,11 @@ async function main() {
   await shot("10-scene-text");
   await pop.locator(".text-link", { hasText: "Ancient Red Dragon" }).click();
   await page.waitForFunction((ns) => window.host.state.popovers[`${ns}/panel`]?.el.src.includes("resource=dragon"), NS, { timeout: 10_000 });
+  await panelFrame.locator("iframe.lk-frame").waitFor();
+  check("the panel reopens at the remembered width", (await host(() => window.host.popovers()))[`${NS}/panel`].options.width === savedWidth);
+  await panelFrame.getByRole("button", { name: "Full page (GM)" }).click();
   await panelFrame.getByText("Gargantuan dragon, chaotic evil").waitFor();
-  check("the GM sees secrets in the API view", (await panelFrame.locator(".lk-box-secret").count()) === 1);
+  check("the GM can also read the page through the API, secrets included", (await panelFrame.locator(".lk-box-secret").count()) === 1);
   await shot("11-content-panel");
   await pop.locator(".text-group-head button", { hasText: "Rumour" }).click();
   check("clicking an item's name selects it on the map", (await host(() => window.host.state.selection)).includes("note-1"));
@@ -478,7 +494,7 @@ async function main() {
   }, { ns: NS, items: [plain("goblin-token", "goblin.png", "Goblin Boss"), linkedVillain, plain("other", "token-09.png", ""), textItem("p-text", "Ancient Red Dragon and The Hollow Queen")] });
   await player.evaluate(() => window.host.boot());
   const playerPop = player.frameLocator("#popover");
-  await playerPop.getByText("public pages").waitFor();
+  await playerPop.getByText("The Test Realm: 5 pages, updated just now").waitFor();
   check("players get the page-opening view, not the importer", (await playerPop.getByText("Choose artwork").count()) === 0 && (await playerPop.getByRole("button", { name: "Owlbear panel" }).isVisible()));
   await playerPop.locator(".text-link", { hasText: "Ancient Red Dragon" }).waitFor();
   check("players see public pages named in the scene, never hidden ones", (await playerPop.locator(".text-link", { hasText: "Mordrith" }).count()) === 0);

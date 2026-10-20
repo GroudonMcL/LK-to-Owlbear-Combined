@@ -1429,3 +1429,40 @@ a.btn {
   color: var(--text);
   text-decoration: underline;
 }
+
+/* Side panel resize grip, along the left edge. */
+.panel-resize {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 7px;
+  z-index: 30;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.panel-resize::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 3px;
+  height: 44px;
+  transform: translateY(-50%);
+  border-radius: 3px;
+  background: var(--border-strong);
+  transition: background 0.15s var(--ease);
+}
+
+.panel-resize:hover::after,
+.panel-resize:active::after {
+  background: var(--accent);
+}
+
+.panel-resize-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+  cursor: ew-resize;
+}

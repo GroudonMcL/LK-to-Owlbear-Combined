@@ -9,11 +9,11 @@ import { createLink, LINK_KEY, parseLink } from "./links";
 import { resolveToken } from "./match";
 import { getPlayerLink, gmLinkFor, setPlayerLink, type PageLink } from "./pageLinks";
 import { loadPageList, PageListError, type Role } from "./pageLists";
+import { loadPanelWidth } from "./panelWidth";
 import { loadSettings } from "./settings";
 import { tokenLabel } from "./token";
 import { tabUrl } from "./urls";
 
-const PANEL_WIDTH = 440;
 
 export type PickerMode = "open" | "link";
 
@@ -90,36 +90,24 @@ export async function openPage(platform: Platform, list: PageList, role: Role, l
       public: "1",
       ...(entry?.hidden ? { hidden: "1" } : {}),
     });
-    return platform.openSidePanel(PANEL_POPOVER_ID, url, PANEL_WIDTH);
+    return platform.openSidePanel(PANEL_POPOVER_ID, url, loadPanelWidth());
   }
   return openInTab(platform, tabUrl(role, list.projectId, link.resourceId, list.isPublic), name);
 }
 
 /**
- * Opens a page found in a note or Text item. The GM reads it in the side
- * panel as fetched from LegendKeeper's API, hidden pages and secrets
- * included. Players get only LegendKeeper's public view, and only of pages in
- * the public page list (which never holds hidden pages).
+ * Opens a page found in a note or Text item, exactly as "Open LK Page" opens a
+ * token's page: LegendKeeper's own page, in the side panel or a new tab as
+ * each person chose. Players only ever get pages in the public list (which
+ * never holds hidden pages), and only the public view.
  */
 export async function openTextMatch(platform: Platform, link: PageLink): Promise<void> {
   const role = await platform.getRole();
   const list = await loadPageList(platform, role);
-  if (role === "PLAYER") {
-    if (!list.isPublic) {
-      return platform.notify("This LegendKeeper project isn't public, so its pages can't be shown to players.", "WARNING");
-    }
-    return openPage(platform, list, role, link);
+  if (role === "PLAYER" && !list.isPublic) {
+    return platform.notify("This LegendKeeper project isn't public, so its pages can't be shown to players.", "WARNING");
   }
-  const entry = list.pages.find((page) => page.id === link.resourceId);
-  const url = extensionUrl("panel.html", {
-    project: list.projectId,
-    resource: link.resourceId,
-    name: entry?.name ?? link.name,
-    view: "content",
-    ...(entry?.hidden ? { hidden: "1" } : {}),
-    ...(list.isPublic ? { public: "1" } : {}),
-  });
-  return platform.openSidePanel(PANEL_POPOVER_ID, url, PANEL_WIDTH);
+  return openPage(platform, list, role, link);
 }
 
 /** Opens a page by id, loading the page list first (for the popover's "Open page"). */

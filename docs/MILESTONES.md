@@ -191,7 +191,8 @@ Worker.
   `GET /api/public/projects/:id/page-list` (players, no password, fetched from
   LegendKeeper without a key so it can only hold public pages). Lists follow
   LegendKeeper's cursor, leave templates out, mark pages under hidden folders, cap at
-  5,000 pages and are cached for a minute.
+  5,000 pages and are cached for a minute. (Since Milestone 7: served in chunks, with no cap
+  below about 300,000 pages, and kept in the browser for 10 minutes.)
 - **One token link.** "Link LK Page…" by the GM writes the importer's link metadata, so
   imported tokens open their page directly and manually linked tokens show up in the
   importer's duplicate checks. Players' links stay in their browser.
@@ -254,3 +255,12 @@ room or scene, and a player's public-only matches and public view.
 - The content view shows what LegendKeeper's block API can express; maps, boards and
   embeds are named but not drawn (the public view shows them).
 - Not yet run against a live LegendKeeper project or a live Owlbear room.
+
+**Follow-up after first use** (a project of 13,154 pages)
+- Page lists timed out: one Worker request tried to list everything (over the free plan's
+  50 outbound calls, and past the browser's 20 s wait), and each frame listed separately.
+  The Worker now serves chunks, the browser builds the list, shares it across frames
+  through local storage for 10 minutes, and shows progress in Settings and the players'
+  popover.
+- Text links open the real LegendKeeper page, as tokens do; the API view is a switch.
+- The side panel can be resized by dragging its left edge, and remembers its width.

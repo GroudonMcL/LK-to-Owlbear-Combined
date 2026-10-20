@@ -35,11 +35,15 @@ shown to another.
 | --- | --- |
 | Importer: search, page details, images | Worker, with the GM's key |
 | GM's page list (Open/Link LK Page, scene text, hidden pages included) | Worker, with the GM's key |
-| GM's page reading (scene text links, hidden pages) | Worker, with the GM's key |
+| GM's page reading through the API (hidden pages, **Full page (GM)**) | Worker, with the GM's key |
 | Players' page list (public pages only) | Worker, **without** a key, as an anonymous visitor would |
 
-Players need nothing at all. Page lists are fetched live (cached for a minute; **Refresh
-page list** fetches at once), so new and renamed pages show up without redeploying.
+Players need nothing at all. Page lists are fetched live, so new and renamed pages show
+up without redeploying. A big project takes a while to list (LegendKeeper hands out 100
+pages per call), so the list is kept in the browser, shared by every part of the extension, and
+checked again every 10 minutes; **Refresh page list** fetches it at once. Settings (and
+the players' popover) show its state, e.g. *D&D - Greyhawk: loading pages…* and then
+*D&D - Greyhawk: 13,154 pages, updated just now*.
 
 ## What it does
 
@@ -55,7 +59,8 @@ page list** fetches at once), so new and renamed pages show up without redeployi
 - **Where pages open** is each person's choice in the toolbar popover:
   - **Owlbear panel**: a full-height panel on the right showing LegendKeeper's read-only
     public view, with **back**, **home** and **forward** buttons floating over its top bar
-    for following links between pages. The GM gets an **Edit in LegendKeeper** button that
+    for following links between pages. Drag its left edge to make it wider or narrower;
+    it remembers the width. The GM gets an **Edit in LegendKeeper** button that
     opens the page in the full app; players get **Open in LegendKeeper** (the public view
     in a tab).
   - **New tab**: the full app for the GM, where pages can be edited and DM notes read;
@@ -82,10 +87,11 @@ page list** fetches at once), so new and renamed pages show up without redeployi
 - **Toolbar popover:** the GM's **In this scene** tab (players: **Named in this scene**)
   lists every page the scene mentions, grouped by the note or text it was found in.
   Clicking the note's name shows it on the map.
-- **Clicking a page** opens it in the side panel:
-  - The **GM** reads the page as LegendKeeper's API returns it: hidden pages, secrets and
-    the sidebar included, with images and links to other pages (which open in place).
-    In a public project, **Public view** switches to the framed public page.
+- **Clicking a page** opens it exactly as **Open LK Page** opens a token's page: the
+  LegendKeeper page itself, in the Owlbear panel or a new tab as each person chose.
+  - The **GM** can switch the panel to **Full page (GM)**, the page as LegendKeeper's API
+    returns it: secrets and the sidebar included. Hidden pages, which the public view
+    can't show, open that way.
   - **Players** match only against public pages, so hidden pages never show up for
     them, and get only LegendKeeper's public view. In a private project, their links
     explain that pages can't be shown to players.
@@ -191,8 +197,10 @@ access password (`LKOB_ACCESS_TOKENS`). Neither is used any more:
 The Cloudflare free plan covers normal use: 100,000 requests per day. Finished tokens
 are stored in Workers KV (1 GB and 1,000 new tokens per day on the free plan) and served
 from Cloudflare's cache. LegendKeeper allows 300 API requests per minute per key. A page
-open in the importer or the panel uses 2–10 of them; a page list uses one per 100 pages,
-at most once a minute per Worker instance. Page lists stop at 5,000 pages.
+open in the importer or the panel uses 2–10 of them; a page list uses one per 100 pages
+(about 130 for 13,000 pages), at most once every 10 minutes per browser. The Worker
+fetches it in chunks of 1,500 pages, staying under the free plan's 50 outbound calls per
+request.
 
 ## How it fits together
 

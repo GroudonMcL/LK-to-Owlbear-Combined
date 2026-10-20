@@ -261,6 +261,15 @@
       state.popovers[d.id].options = { ...d };
       return {};
     },
+    OBR_POPOVER_GET_WIDTH: (_f, d) => ({ width: state.popovers[d.id]?.options.width }),
+    OBR_POPOVER_SET_WIDTH: (_f, d) => {
+      const frame = state.popovers[d.id];
+      if (frame) {
+        frame.options.width = d.width;
+        frame.el.style.width = `${d.width}px`;
+      }
+      return {};
+    },
     OBR_POPOVER_CLOSE: (_f, d) => {
       const frame = state.popovers[d.id];
       if (frame) {

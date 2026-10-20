@@ -8,7 +8,9 @@ import { useEffect, useState } from "react";
 import { loadPageList, PageListError } from "../lib/pageLists";
 import { CH_PAGES_REFRESHED } from "../platform/channels";
 import type { Platform } from "../platform/types";
+import { getRoomProject } from "../lib/project";
 import { Banner, Button, Spinner } from "../ui/components";
+import { PageListStatusLine } from "../ui/PageListStatusLine";
 import type { TextMatchState } from "../ui/useTextMatches";
 import { OpenModeField } from "./OpenModeField";
 import { SceneTextView } from "./SceneTextView";
@@ -17,6 +19,13 @@ export function PlayerView({ platform, textMatches }: { platform: Platform; text
   const [list, setList] = useState<PageList | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [projectId, setProjectId] = useState("");
+
+  useEffect(() => {
+    void getRoomProject(platform)
+      .then((p) => setProjectId(p?.id ?? ""))
+      .catch(() => undefined);
+  }, [platform]);
 
   const load = async (fresh = false) => {
     try {
@@ -54,16 +63,12 @@ export function PlayerView({ platform, textMatches }: { platform: Platform; text
             <strong>Link LK Page…</strong> picks the page yourself. Your choice is kept in this browser.
           </span>
         </div>
-        {!list && !error && (
+        {!list && !error && !projectId && (
           <div className="row small muted">
             <Spinner /> Checking the room's project…
           </div>
         )}
-        {list && (
-          <div className="small faint">
-            {list.projectName}: {list.pages.length} public page{list.pages.length === 1 ? "" : "s"}.
-          </div>
-        )}
+        {projectId && <PageListStatusLine listKey={`public/${projectId}`} />}
         {error && <Banner tone="warn">{error}</Banner>}
         <Button size="sm" icon={<RefreshCw />} loading={refreshing} onClick={() => void refresh()}>
           Refresh page list

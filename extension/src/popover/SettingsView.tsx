@@ -9,6 +9,7 @@ import { isConfigured, SAME_ORIGIN_BACKEND, saveSettings, useSettings, type Sett
 import { CH_PAGES_REFRESHED } from "../platform/channels";
 import type { Platform } from "../platform/types";
 import { Banner, Button, Field, IconButton, Segmented } from "../ui/components";
+import { PageListStatusLine } from "../ui/PageListStatusLine";
 import { OpenModeField } from "./OpenModeField";
 import { useSceneLinks } from "./useSceneLinks";
 
@@ -23,7 +24,7 @@ export function SettingsView({ platform, onDone }: { platform: Platform; onDone:
   const [url, setUrl] = useState(settings.backendUrl);
   const [key, setKey] = useState(settings.apiKey);
   const [showKey, setShowKey] = useState(false);
-  const [refresh, setRefresh] = useState<{ kind: "idle" | "busy" } | { kind: "done" | "error"; message: string }>({ kind: "idle" });
+  const [refreshing, setRefreshing] = useState(false);
   const [connection, setConnection] = useState<Connection>({ kind: "idle" });
   const sceneLinks = useSceneLinks(platform);
   const [clearing, setClearing] = useState(false);
@@ -39,11 +40,15 @@ export function SettingsView({ platform, onDone }: { platform: Platform; onDone:
     try {
       const health = await api.health();
       const projects = await api.projects(true);
+      const keyChanged = apiKey.trim() !== settings.apiKey;
       saveSettings({ backendUrl: cleanUrl, apiKey: apiKey.trim() });
       setConnection({ kind: "ok", health, projects });
       // A key opens exactly one project, which is selected automatically.
       const project = projects.projects[0];
-      if (project && (settings.projectId !== project.id || settings.projectName !== project.name)) selectProject(project);
+      const projectChanged = Boolean(project) && settings.projectId !== project.id;
+      if (project && (projectChanged || settings.projectName !== project.name)) selectProject(project);
+      // Start loading the page list now (a big project takes a while); the status line shows progress.
+      if (project) void loadPageList(platform, "GM", keyChanged || projectChanged).then(announce, () => undefined);
       if (!health.tokenHosting && settings.hosting === "backend") saveSettings({ hosting: "owlbear" });
     } catch (err) {
       setConnection({ kind: "error", message: describeError(err) });
@@ -69,17 +74,19 @@ export function SettingsView({ platform, onDone }: { platform: Platform; onDone:
     setConnection({ kind: "idle" });
   };
 
-  // Reloads the page list now (it is otherwise cached for a minute) and tells
-  // the background page and other open frames to re-match against it.
+  // Tells the background page and other open frames to re-match against the new list.
+  const announce = () => void platform.sendLocal(CH_PAGES_REFRESHED, {}).catch(() => undefined);
+
+  // Reloads the page list now (it is otherwise reused for 10 minutes).
   const refreshPages = async () => {
-    setRefresh({ kind: "busy" });
+    setRefreshing(true);
     try {
-      const list = await loadPageList(platform, "GM", true);
-      await platform.sendLocal(CH_PAGES_REFRESHED, {}).catch(() => undefined);
-      const count = `${list.pages.length} page${list.pages.length === 1 ? "" : "s"}`;
-      setRefresh({ kind: "done", message: `${count} loaded${list.truncated ? " (the list stops at 5,000)" : ""}.` });
-    } catch (err) {
-      setRefresh({ kind: "error", message: describeError(err) });
+      await loadPageList(platform, "GM", true);
+      announce();
+    } catch {
+      // The status line shows what went wrong.
+    } finally {
+      setRefreshing(false);
     }
   };
   const hostingAvailable = connection.kind !== "ok" || connection.health.tokenHosting;
@@ -194,12 +201,11 @@ export function SettingsView({ platform, onDone }: { platform: Platform; onDone:
           )}
 
           {isConfigured(settings) && (
-            <Field label="Page list" hint="Pages are matched against tokens and scene text. The list refreshes itself every minute.">
-              <Button icon={<RefreshCw />} loading={refresh.kind === "busy"} onClick={() => void refreshPages()}>
+            <Field label="Page list" hint="Pages are matched against tokens and scene text. The list is checked again every 10 minutes.">
+              <PageListStatusLine listKey={`gm/${settings.projectId}`} />
+              <Button icon={<RefreshCw />} loading={refreshing} onClick={() => void refreshPages()} style={{ marginTop: 6 }}>
                 Refresh page list
               </Button>
-              {refresh.kind === "done" && <div className="small faint" style={{ marginTop: 6 }}>{refresh.message}</div>}
-              {refresh.kind === "error" && <Banner tone="danger">{refresh.message}</Banner>}
             </Field>
           )}
         </section>
