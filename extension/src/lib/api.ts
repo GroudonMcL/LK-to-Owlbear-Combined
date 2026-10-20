@@ -2,6 +2,7 @@ import type {
   ApiErrorBody,
   ErrorCode,
   HealthResponse,
+  PageContent,
   PageDetails,
   PageList,
   ProjectsResponse,
@@ -33,7 +34,7 @@ const TIMEOUT_MS = 20_000;
 export class ApiClient {
   private readonly base: string;
 
-  constructor(private readonly settings: Pick<Settings, "backendUrl" | "accessToken">) {
+  constructor(private readonly settings: Pick<Settings, "backendUrl" | "apiKey">) {
     this.base = settings.backendUrl.replace(/\/+$/, "");
   }
 
@@ -45,7 +46,7 @@ export class ApiClient {
       response = await fetch(this.base + path, {
         ...init,
         signal: combined,
-        headers: { ...(auth ? { Authorization: `Bearer ${this.settings.accessToken}` } : {}), ...(init.headers ?? {}) },
+        headers: { ...(auth ? { Authorization: `Bearer ${this.settings.apiKey}` } : {}), ...(init.headers ?? {}) },
       });
     } catch (err) {
       if (signal?.aborted) throw new ApiError("Cancelled", "aborted", "ABORTED", false);
@@ -83,7 +84,7 @@ export class ApiClient {
   }
 
   async health(): Promise<HealthResponse> {
-    // Health is public; requesting it confirms the URL, not the token.
+    // Health is public; requesting it confirms the URL, not the key.
     let res: Response;
     try {
       res = await fetch(`${this.base}/api/health`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -96,6 +97,7 @@ export class ApiClient {
     return body;
   }
 
+  /** The project the API key opens; this is also how a key is checked. */
   projects(refresh = false): Promise<ProjectsResponse> {
     return this.json(`/api/projects${refresh ? "?refresh=1" : ""}`);
   }
@@ -113,12 +115,21 @@ export class ApiClient {
     );
   }
 
-  /** Every page of the project, hidden ones included (needs the access token). */
+  /** A page's content to read, from LegendKeeper's API (hidden pages and secrets included). */
+  content(projectId: string, resourceId: string, fresh = false, signal?: AbortSignal): Promise<PageContent> {
+    return this.json(
+      `/api/projects/${encodeURIComponent(projectId)}/pages/${encodeURIComponent(resourceId)}/content${fresh ? "?fresh=1" : ""}`,
+      undefined,
+      signal,
+    );
+  }
+
+  /** Every page of the project, hidden ones included (needs the API key). */
   pageList(projectId: string, fresh = false): Promise<PageList> {
     return this.json(`/api/projects/${encodeURIComponent(projectId)}/page-list${fresh ? "?fresh=1" : ""}`);
   }
 
-  /** The project's public pages; open to players, who have no access token. */
+  /** The project's public pages; open to players, who have no API key. */
   async publicPageList(projectId: string): Promise<PageList> {
     const res = await this.request(`/api/public/projects/${encodeURIComponent(projectId)}/page-list`, {}, undefined, false);
     return (await res.json()) as PageList;

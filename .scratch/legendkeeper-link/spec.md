@@ -5,7 +5,7 @@ Status: wontfix
 > Superseded: this is the design of the standalone Page Link extension, kept for its
 > findings (CORS, framing, keyless reads). In the combined extension, page lists are no
 > longer built by a GitHub Actions workflow: the Cloudflare Worker serves them live, the
-> GM's through its `LK_API_KEYS` secret and players' keylessly (see README, "How it fits
+> GM's with the API key the GM pastes into Settings and players' keylessly (see README, "How it fits
 > together"). Token links use the importer's metadata format.
 
 Open the LegendKeeper page that matches a token, from the token's context menu in Owlbear Rodeo.

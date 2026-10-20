@@ -1,8 +1,8 @@
 {
   "name": "LegendKeeper for Owlbear",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "manifest_version": 1,
-  "description": "Open a token's LegendKeeper page from its context menu, and turn LegendKeeper page art into framed, linked tokens.",
+  "description": "Open a token's LegendKeeper page from its context menu, link page names in your notes and text to their pages, and turn LegendKeeper page art into framed, linked tokens.",
   "author": "GroudonMcL",
   "icon": "/icon.svg",
   "homepage_url": "https://github.com/GroudonMcL/LK-to-Owlbear-Combined",

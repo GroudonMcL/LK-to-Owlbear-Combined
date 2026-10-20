@@ -60,6 +60,8 @@ export interface Platform {
   addItems(items: Item[]): Promise<void>;
   updateItems(ids: string[], update: (items: Item[]) => void): Promise<void>;
   selectAndFocus(ids: string[]): Promise<void>;
+  /** Ids of the items this player has selected. */
+  getSelection(): Promise<string[]>;
   gridDpi(): Promise<number>;
   /** Snaps a token centre so a footprint of `cells` squares lines up with the grid. */
   snap(position: Vector2, cells: number): Promise<Vector2>;

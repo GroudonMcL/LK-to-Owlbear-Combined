@@ -5,8 +5,7 @@ import http from "node:http";
 import path from "node:path";
 import { ConfigError, loadConfig } from "../core/config.js";
 import { createHandler, VERSION } from "../core/handler.js";
-import { LkClient } from "../core/lk/client.js";
-import { PageService, ProjectRegistry } from "../core/services.js";
+import { PageService, ProjectResolver } from "../core/services.js";
 import { toNodeListener } from "./adapter.js";
 import { FileTokenStore } from "./fileTokenStore.js";
 import { safeFetch } from "./safeFetch.js";
@@ -23,9 +22,9 @@ async function main(): Promise<void> {
     throw err;
   }
 
-  const clients = config.lkApiKeys.map((apiKey) => new LkClient({ baseUrl: config.lkBaseUrl, apiKey }));
-  const registry = new ProjectRegistry(clients);
-  const pages = new PageService(registry, {
+  const projects = new ProjectResolver();
+  const pages = new PageService(projects, {
+    lkBaseUrl: config.lkBaseUrl,
     maxSourceImageBytes: config.maxSourceImageBytes,
     assetHostAllowlist: config.assetHostAllowlist,
     allowInsecureAssetFetch: config.allowInsecureAssetFetch,
@@ -39,7 +38,7 @@ async function main(): Promise<void> {
   }
 
   if (config.allowedOrigins === "*") {
-    console.warn("LKOB_ALLOWED_ORIGINS is not set: any origin may call the API (the access token is still required).");
+    console.warn("LKOB_ALLOWED_ORIGINS is not set: any origin may call the API (an API key is still required).");
   }
   if (tokens && !config.publicBaseUrl) {
     console.warn("LKOB_PUBLIC_URL is not set: token URLs will be derived from the request's Host header.");
@@ -48,11 +47,11 @@ async function main(): Promise<void> {
     console.warn("LKOB_INSECURE_ASSET_FETCH=1: private-address protection is OFF. Use only for local testing.");
   }
 
-  const server = http.createServer(toNodeListener(createHandler({ config, registry, pages, tokens })));
+  const server = http.createServer(toNodeListener(createHandler({ config, projects, pages, tokens })));
   server.requestTimeout = 60_000;
   server.listen(config.port, config.host, () => {
     console.log(`LegendKeeper for Owlbear server ${VERSION} on http://${config.host}:${config.port}`);
-    console.log(`Projects: ${config.lkApiKeys.length} key(s) configured; token hosting ${tokens ? "on" : "off"}.`);
+    console.log(`Token hosting ${tokens ? "on" : "off"}. LegendKeeper API keys come from the extension.`);
   });
 
   const shutdown = () => server.close(() => process.exit(0));

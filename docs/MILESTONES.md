@@ -220,3 +220,37 @@ Worker.
 - LegendKeeper's keyless listing of a public project, which the players' list relies on,
   was verified by LegendKeeper Link before; it has not yet been run from a Cloudflare Worker
   against the live API.
+
+## Milestone 7: Scene text links; the API key in Settings
+
+**Implemented** (spec: `.scratch/text-links/spec.md`)
+- **API key in Settings.** The GM pastes their LegendKeeper key into the popover; it lives
+  in the browser's local storage only. The Worker no longer needs `LK_API_KEYS` or
+  `LKOB_ACCESS_TOKENS` (and the deploy workflow no longer sets them): it relays each
+  request with the key the extension sends, keys every cache by a digest of it, and only
+  serves a key's own project. **Refresh page list** reloads the list in every frame.
+- **Detect after typing.** `textMatch.ts` reads notes (Note-layer images, rich text) and
+  Text items and finds page names and aliases: case-insensitive, whole words, longest
+  phrase first, re-checked on every item change.
+- **Two places.** The background page keeps a **LegendKeeper pages** context-menu entry
+  (with an embed listing the pages) on exactly the items that have matches. The popover
+  has an **In this scene** tab (players: **Named in this scene**), grouped by item.
+- **Reading a page.** A new `/api/projects/:p/pages/:r/content` route turns LegendKeeper's
+  block tree into a display model (text with marks, lists, tables, key/value rows,
+  callouts, secrets, images by page-scoped id, safe links, mentions). The side panel
+  shows it to the GM, with a switch to the public view; players only ever get the public
+  view, matched against public pages only.
+
+**Tests run.** Text matching (15 unit tests); the content route, per-key cache isolation,
+wrong-project refusals, keyless public lists and per-key rate limits on Node and on the
+Worker; e2e (20 new checks): connecting with a refused and then a working key, refreshing
+the page list, the text menu on the right items only, its embed, the content panel with
+secrets, the popover's grouped list, re-checking edited text, the key never reaching the
+room or scene, and a player's public-only matches and public view.
+
+**Known limitations**
+- Owlbear has no API to style part of a text item, so matched words aren't highlighted on
+  the map.
+- The content view shows what LegendKeeper's block API can express; maps, boards and
+  embeds are named but not drawn (the public view shows them).
+- Not yet run against a live LegendKeeper project or a live Owlbear room.

@@ -8,14 +8,13 @@ import { loadConfig } from "../src/core/config.js";
 import { createHandler, VERSION } from "../src/core/handler.js";
 import { LkClient } from "../src/core/lk/client.js";
 import { imageIdFor } from "../src/core/lk/extract.js";
-import { PageService, ProjectRegistry } from "../src/core/services.js";
+import { PageService, ProjectResolver } from "../src/core/services.js";
 import { toNodeListener } from "../src/node/adapter.js";
 import { FileTokenStore } from "../src/node/fileTokenStore.js";
 import { safeFetch } from "../src/node/safeFetch.js";
 import worker, { type KvLike } from "../src/worker.js";
-import { API_KEY, makePng, PROJECT_ID, startMockLk, type MockLk } from "./mockLk.js";
+import { API_KEY, makePng, OTHER_API_KEY, OTHER_PROJECT_ID, PROJECT_ID, startMockLk, type MockLk } from "./mockLk.js";
 
-const ACCESS = "test-access-token-0123456789abcdef";
 let lk: MockLk;
 let server: http.Server;
 let base = "";
@@ -47,8 +46,6 @@ type Runtime = (typeof RUNTIMES)[number];
 
 function envFor(options: { hosting?: boolean }) {
   return {
-    LKOB_ACCESS_TOKENS: ACCESS,
-    LK_API_KEYS: API_KEY,
     LK_BASE_URL: lk.baseUrl,
     LKOB_TOKEN_DIR: tokenDir,
     LKOB_TOKEN_HOSTING: options.hosting === false ? "off" : "on",
@@ -65,8 +62,9 @@ async function start(options: { hosting?: boolean } = {}) {
   let handle: (request: Request) => Promise<Response>;
   if (runtime === "node") {
     const config = loadConfig(envFor(options));
-    const registry = new ProjectRegistry([new LkClient({ baseUrl: lk.baseUrl, apiKey: API_KEY, sleep: async () => {} })]);
-    const pages = new PageService(registry, {
+    const projects = new ProjectResolver();
+    const pages = new PageService(projects, {
+      lkBaseUrl: lk.baseUrl,
       maxSourceImageBytes: config.maxSourceImageBytes,
       assetHostAllowlist: null,
       allowInsecureAssetFetch: true,
@@ -77,7 +75,8 @@ async function start(options: { hosting?: boolean } = {}) {
       tokens = new FileTokenStore(config.tokenStoreDir, config.tokenStoreMaxBytes);
       await tokens.init();
     }
-    handle = createHandler({ config, registry, pages, tokens, log: () => {} });
+    const makeClient = (apiKey: string) => new LkClient({ baseUrl: lk.baseUrl, apiKey, sleep: async () => {} });
+    handle = createHandler({ config, projects, pages, tokens, makeClient, log: () => {} });
   } else {
     // The real Worker entry, with a fake KV namespace and static-asset binding.
     const env = {
@@ -97,10 +96,10 @@ async function stop() {
   await new Promise<void>((r) => server.close(() => r()));
 }
 
-function api(pathname: string, init: RequestInit = {}) {
+function api(pathname: string, init: RequestInit = {}, key = API_KEY) {
   return fetch(base + pathname, {
     ...init,
-    headers: { Authorization: `Bearer ${ACCESS}`, Origin: "https://ext.example", ...(init.headers ?? {}) },
+    headers: { Authorization: `Bearer ${key}`, Origin: "https://ext.example", ...(init.headers ?? {}) },
   });
 }
 
@@ -128,13 +127,21 @@ describe("auth and CORS", () => {
     expect(await res.json()).toEqual({ ok: true, version: VERSION, tokenHosting: true });
   });
 
-  it("rejects missing and wrong access tokens", async () => {
+  it("asks for an API key without calling LegendKeeper", async () => {
     const missing = await fetch(`${base}/api/projects`);
     expect(missing.status).toBe(401);
     expect((await missing.json()).error.code).toBe("UNAUTHORIZED");
-    const wrong = await fetch(`${base}/api/projects`, { headers: { Authorization: "Bearer nope" } });
-    expect(wrong.status).toBe(401);
+    const junk = await fetch(`${base}/api/projects`, { headers: { Authorization: "Bearer nope" } });
+    expect(junk.status).toBe(401);
     expect(lk.requests).toEqual([]);
+  });
+
+  it("passes LegendKeeper's verdict on a wrong key back to the extension", async () => {
+    const res = await api("/api/projects", {}, "lk_wrong_key_0000000000");
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error.code).toBe("UPSTREAM_AUTH");
+    expect(body.error.message).toMatch(/didn't accept your API key/);
   });
 
   it("answers preflight for the allowed origin only", async () => {
@@ -148,9 +155,11 @@ describe("auth and CORS", () => {
 });
 
 describe("projects and search", () => {
-  it("lists the project behind each key", async () => {
+  it("names the project the key opens", async () => {
     const body = await (await api("/api/projects")).json();
-    expect(body).toEqual({ projects: [{ id: PROJECT_ID, name: "The Test Realm", isPublic: false }], failures: [] });
+    expect(body).toEqual({ projects: [{ id: PROJECT_ID, name: "The Test Realm", isPublic: false }] });
+    const other = await (await api("/api/projects", {}, OTHER_API_KEY)).json();
+    expect(other).toEqual({ projects: [{ id: OTHER_PROJECT_ID, name: "Another World", isPublic: false }] });
   });
 
   it("de-duplicates search hits and keeps the content match snippet", async () => {
@@ -171,10 +180,23 @@ describe("projects and search", () => {
     expect(lk.requests).toEqual([]);
   });
 
-  it("refuses projects it has no key for", async () => {
+  it("refuses projects the key doesn't open, without asking LegendKeeper", async () => {
+    await api("/api/projects");
+    lk.requests.length = 0;
     const res = await api(`/api/projects/proj_other/search?q=x`);
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe("PROJECT_NOT_CONFIGURED");
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("WRONG_PROJECT");
+    expect(lk.requests).toEqual([]);
+  });
+
+  it("never answers one key from another key's cache", async () => {
+    expect((await api(`/api/projects/${PROJECT_ID}/pages/goblin`)).status).toBe(200);
+    expect((await api(`/api/projects/${PROJECT_ID}/page-list`)).status).toBe(200);
+    for (const path of [`/api/projects/${PROJECT_ID}/pages/goblin`, `/api/projects/${PROJECT_ID}/page-list`, `/api/projects/${PROJECT_ID}/pages/goblin/content`]) {
+      const res = await api(path, {}, OTHER_API_KEY);
+      expect(res.status).toBe(403);
+      expect((await res.json()).error.code).toBe("WRONG_PROJECT");
+    }
   });
 });
 
@@ -224,6 +246,34 @@ describe("page details", () => {
     expect(res.status).toBe(429);
     expect(res.headers.get("retry-after")).toBe("90");
     expect((await res.json()).error).toMatchObject({ code: "RATE_LIMITED", retryable: true, retryAfter: 90 });
+  });
+
+  it("returns the page's content to read, with safe links, mentions, secrets and image ids", async () => {
+    const res = await api(`/api/projects/${PROJECT_ID}/pages/goblin/content?fresh=1`);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain(lk.assetBase);
+    expect(text).not.toContain("javascript:");
+    const content = JSON.parse(text);
+    expect(content).toMatchObject({ id: "goblin", name: "Goblin Boss", aliases: ["Boss"], otherDocuments: ["Lair map"] });
+    expect(content.sidebar[1]).toMatchObject({ kind: "box", title: "Stats" });
+    expect(content.sidebar[1].children[0]).toMatchObject({ kind: "keyValue", rows: [{ key: "Type", runs: [{ text: "Humanoid" }] }, { key: "Size" }] });
+    const overview = content.documents.find((d: { name: string }) => d.name === "Overview");
+    expect(overview.blocks[0]).toEqual({ kind: "heading", level: 1, runs: [{ text: "Goblin Boss" }] });
+    const list = overview.blocks.find((b: { kind: string }) => b.kind === "list");
+    expect(list.items[0][0].runs).toEqual([
+      { text: "Serves ", bold: true },
+      { text: "Ancient Red Dragon", mention: "dragon" },
+      { text: " (see " },
+      { text: "wiki", link: "https://example.com/wiki" },
+      { text: ")" },
+    ]);
+    expect(overview.blocks.at(-1)).toMatchObject({ kind: "box", tone: "secret", children: [{ kind: "paragraph" }] });
+    const details = await (await api(`/api/projects/${PROJECT_ID}/pages/goblin`)).json();
+    const imageIds = details.images.map((i: { id: string }) => i.id);
+    const contentImage = overview.blocks.find((b: { kind: string }) => b.kind === "image");
+    expect(imageIds).toContain(contentImage.imageId);
+    expect(content.documents.find((d: { name: string }) => d.name === "Broken")).toMatchObject({ failed: true, blocks: [] });
   });
 
   it("rejects malformed ids", async () => {
@@ -290,6 +340,8 @@ describe("token hosting", () => {
     expect(huge.status).toBe(400);
     const anon = await fetch(`${base}/api/tokens`, { method: "POST", body: makePng(64, 64) });
     expect(anon.status).toBe(401);
+    const badKey = await api("/api/tokens", { method: "POST", body: makePng(64, 64) }, "lk_wrong_key_0000000000");
+    expect(badKey.status).toBe(502);
   });
 
   it("only serves well-formed token file names", async () => {
@@ -329,22 +381,21 @@ describe("page lists", () => {
     expect(lk.requests).toEqual([]);
   });
 
-  it("requires the access token for the GM list", async () => {
+  it("requires an API key for the GM list", async () => {
     const res = await fetch(`${base}/api/projects/${PROJECT_ID}/page-list`);
     expect(res.status).toBe(401);
   });
 
-  it("gives players an empty public list for a private project, without the access token", async () => {
+  it("gives players an empty public list for a private project, without any key", async () => {
     const res = await fetch(`${base}/api/public/projects/${PROJECT_ID}/page-list`);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ isPublic: false, audience: "public", pages: [] });
-    expect(lk.requests.filter((r) => r.endsWith("/resources"))).toEqual([]);
   });
 
   it("lists a public project's public pages keylessly, so hidden ones never appear", async () => {
     lk.setPublic(true);
     await stop();
-    await start(); // a fresh registry sees the project as public
+    await start(); // a fresh server forgets the cached private answer
     try {
       const list = await (await fetch(`${base}/api/public/projects/${PROJECT_ID}/page-list`)).json();
       expect(list).toMatchObject({ isPublic: true, audience: "public" });
@@ -360,12 +411,11 @@ describe("page lists", () => {
     }
   });
 
-  it("refuses public lists for projects it has no key for, without calling LegendKeeper", async () => {
-    await api("/api/projects"); // keys resolved
+  it("asks LegendKeeper anonymously, sending no key, and caches the answer", async () => {
+    const res = await fetch(`${base}/api/public/projects/proj_unknown/page-list`, { headers: { Authorization: `Bearer ${API_KEY}` } });
+    expect(await res.json()).toMatchObject({ isPublic: false, pages: [] });
     lk.requests.length = 0;
-    const res = await fetch(`${base}/api/public/projects/proj_other/page-list`);
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe("PROJECT_NOT_CONFIGURED");
+    await fetch(`${base}/api/public/projects/proj_unknown/page-list`);
     expect(lk.requests).toEqual([]);
     expect((await fetch(`${base}/api/public/projects/bad%20id/page-list`)).status).toBe(400);
   });
@@ -384,13 +434,14 @@ describe("secrets", () => {
 });
 
 describe("rate limiting", () => {
-  it("limits requests per access token", async () => {
+  it("limits requests per API key", async () => {
     await stop();
     rateLimit = 3;
     await start();
     const statuses = [];
     for (let i = 0; i < 4; i++) statuses.push((await api("/api/projects")).status);
     expect(statuses).toEqual([200, 200, 200, 429]);
+    expect((await api("/api/projects", {}, OTHER_API_KEY)).status).toBe(200);
     await stop();
     rateLimit = 1000;
     await start();

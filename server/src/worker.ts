@@ -1,13 +1,13 @@
 // Cloudflare Worker entry: one deployment serves the extension's static files
 // (Workers Static Assets), the API under /api, and hosted tokens under /t.
-// Nothing runs on the GM's computer; secrets live in the Worker's settings.
+// Nothing runs on the GM's computer, and it holds no LegendKeeper key: the
+// extension sends the GM's key with each request.
 
 import { ConfigError, loadConfig, type Env as ConfigEnv } from "./core/config.js";
 import { HttpError } from "./core/errors.js";
 import { createHandler } from "./core/handler.js";
 import { createFetchImageFetcher } from "./core/imageFetch.js";
-import { LkClient } from "./core/lk/client.js";
-import { PageService, ProjectRegistry } from "./core/services.js";
+import { PageService, ProjectResolver } from "./core/services.js";
 import {
   mimeForFile,
   sha256Hex,
@@ -90,20 +90,20 @@ function apiFor(env: WorkerEnv): Handler {
   let handle: Handler;
   try {
     const config = loadConfig(stringVars(env));
-    const clients = config.lkApiKeys.map((apiKey) => new LkClient({ baseUrl: config.lkBaseUrl, apiKey }));
-    const registry = new ProjectRegistry(clients);
-    const pages = new PageService(registry, {
+    const projects = new ProjectResolver();
+    const pages = new PageService(projects, {
+      lkBaseUrl: config.lkBaseUrl,
       maxSourceImageBytes: config.maxSourceImageBytes,
       assetHostAllowlist: config.assetHostAllowlist,
       allowInsecureAssetFetch: config.allowInsecureAssetFetch,
       fetchImage: createFetchImageFetcher(),
     });
     const tokens = config.tokenHosting && env.TOKENS ? new KvTokenStore(env.TOKENS) : null;
-    handle = createHandler({ config, registry, pages, tokens });
+    handle = createHandler({ config, projects, pages, tokens });
   } catch (err) {
     const message =
       err instanceof ConfigError
-        ? `The extension's server is deployed but not configured: ${err.message}. Add the secret in the Worker's settings (or the GitHub repository secrets) and redeploy.`
+        ? `The extension's server is misconfigured: ${err.message}. Fix the variable in the Worker's settings and redeploy.`
         : "The extension's server failed to start.";
     const body = new HttpError(503, "INTERNAL", message).toBody();
     handle = async () => new Response(JSON.stringify(body), { status: 503, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });

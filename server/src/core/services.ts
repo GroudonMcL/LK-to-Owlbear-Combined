@@ -1,7 +1,7 @@
 import type {
+  PageContent,
   PageDetails,
   PageList,
-  PageListAudience,
   ProjectsResponse,
   ProjectSummary,
   SearchHit,
@@ -11,6 +11,7 @@ import { InFlight, TtlCache } from "./cache.js";
 import { HttpError } from "./errors.js";
 import { sniffImageMime, type RasterMime } from "./imageSniff.js";
 import { LkApiError, LkClient, LkNetworkError } from "./lk/client.js";
+import { toContent } from "./lk/content.js";
 import { extractPage, type ExtractedImage } from "./lk/extract.js";
 import { buildPageList } from "./lk/pageList.js";
 import type {
@@ -42,13 +43,14 @@ export function mapUpstreamError(err: unknown, notFound: HttpError): HttpError {
     }
     if (err.status === 401 || err.status === 402 || err.status === 403) {
       const reasons: Record<string, string> = {
-        UNAUTHENTICATED: "The LegendKeeper API key on the server is invalid, revoked or expired.",
+        UNAUTHENTICATED: "LegendKeeper didn't accept your API key: it may be mistyped, revoked or expired.",
         PAID_PLAN_REQUIRED: "LegendKeeper API keys need the project owner to be on a paid plan.",
         SUBSCRIPTION_LAPSED: "The LegendKeeper project owner's plan has lapsed.",
-        WRONG_PROJECT: "The server's API key belongs to a different LegendKeeper project.",
-        INSUFFICIENT_SCOPE: "The server's LegendKeeper API key lacks a required scope.",
+        WRONG_PROJECT: "Your API key belongs to a different LegendKeeper project.",
+        FORBIDDEN: "Your API key can't open that LegendKeeper project.",
+        INSUFFICIENT_SCOPE: "Your LegendKeeper API key lacks a required scope.",
       };
-      return new HttpError(502, "UPSTREAM_AUTH", reasons[err.code] ?? `LegendKeeper refused the server's API key (${err.code}).`, ids);
+      return new HttpError(502, "UPSTREAM_AUTH", reasons[err.code] ?? `LegendKeeper refused your API key (${err.code}).`, ids);
     }
     if (err.status >= 500) {
       return new HttpError(502, "UPSTREAM_UNAVAILABLE", "LegendKeeper had a temporary problem. Try again.", { retryable: true, ...ids });
@@ -58,73 +60,51 @@ export function mapUpstreamError(err: unknown, notFound: HttpError): HttpError {
   return new HttpError(500, "INTERNAL", "Unexpected server error.");
 }
 
-interface KeyedProject {
-  project: ProjectSummary;
+/**
+ * Whoever is calling: a LegendKeeper client holding the API key the
+ * extension sent, and a short digest of that key. Every cache is keyed by
+ * the digest, so one key's results (hidden pages, say) never answer another.
+ */
+export interface Caller {
+  keyId: string;
   client: LkClient;
 }
 
-/** Resolves each configured API key to the one project it can access. */
-export class ProjectRegistry {
-  private resolved: KeyedProject[] | null = null;
-  private resolvedAt = 0;
-  private failures: ProjectsResponse["failures"] = [];
-  private readonly inflight = new InFlight<string, void>();
+/** The one project each API key opens, remembered for a while per key. */
+export class ProjectResolver {
+  private readonly cache = new TtlCache<string, ProjectSummary>({ ttlMs: 10 * 60_000, maxEntries: 500 });
+  private readonly inflight = new InFlight<string, ProjectSummary>();
 
-  constructor(
-    private readonly clients: LkClient[],
-    private readonly refreshMs = 10 * 60_000,
-  ) {}
-
-  private async refresh(): Promise<void> {
-    const settled = await Promise.allSettled(
-      this.clients.map(async (client) => {
-        const list = await client.get<LkList<LkProject>>("/api/v3/projects", { limit: 1 });
-        const project = list.data[0];
-        if (!project) throw new HttpError(502, "UPSTREAM_AUTH", "The API key has no project.");
-        return { client, project: { id: project.id, name: project.name ?? project.id, isPublic: project.isPublic } };
-      }),
-    );
-    const resolved: KeyedProject[] = [];
-    const failures: ProjectsResponse["failures"] = [];
-    settled.forEach((result, keyIndex) => {
-      if (result.status === "fulfilled") {
-        if (!resolved.some((r) => r.project.id === result.value.project.id)) resolved.push(result.value);
-      } else {
-        const mapped = mapUpstreamError(result.reason, new HttpError(502, "UPSTREAM_AUTH", "Project not found for key."));
-        failures.push({ keyIndex, code: mapped.code, message: mapped.message });
+  async projectOf(caller: Caller, fresh = false): Promise<ProjectSummary> {
+    if (!fresh) {
+      const cached = this.cache.get(caller.keyId);
+      if (cached) return cached;
+    }
+    const project = await this.inflight.run(caller.keyId, async () => {
+      try {
+        const list = await caller.client.get<LkList<LkProject>>("/api/v3/projects", { limit: 1 });
+        const found = list.data?.[0];
+        if (!found) throw new HttpError(502, "UPSTREAM_AUTH", "Your API key doesn't open any LegendKeeper project.");
+        return { id: found.id, name: found.name ?? found.id, isPublic: found.isPublic ?? false };
+      } catch (err) {
+        throw mapUpstreamError(err, new HttpError(502, "UPSTREAM_AUTH", "Your API key doesn't open any LegendKeeper project."));
       }
     });
-    this.resolved = resolved;
-    this.failures = failures;
-    this.resolvedAt = Date.now();
+    this.cache.set(caller.keyId, project);
+    return project;
   }
 
-  async list(force = false): Promise<ProjectsResponse> {
-    const stale = !this.resolved || this.failures.length > 0 || Date.now() - this.resolvedAt > this.refreshMs;
-    if (force || stale) await this.inflight.run("refresh", () => this.refresh());
-    return { projects: (this.resolved ?? []).map((r) => r.project), failures: this.failures };
+  async list(caller: Caller, fresh = false): Promise<ProjectsResponse> {
+    return { projects: [await this.projectOf(caller, fresh)] };
   }
 
-  /**
-   * The key and project for a project id. An unknown id re-resolves the keys
-   * (a key may have been added), unless `refreshUnknown` is false: callers
-   * without the access password must not be able to trigger LegendKeeper calls.
-   */
-  async entryFor(projectId: string, refreshUnknown = true): Promise<KeyedProject> {
-    if (!refreshUnknown) await this.list();
-    let match = this.resolved?.find((r) => r.project.id === projectId);
-    if (!match && refreshUnknown) {
-      await this.list(true);
-      match = this.resolved?.find((r) => r.project.id === projectId);
+  /** The caller's project, which must be `projectId`: a key opens only its own project. */
+  async require(caller: Caller, projectId: string): Promise<ProjectSummary> {
+    const project = await this.projectOf(caller);
+    if (project.id !== projectId) {
+      throw new HttpError(403, "WRONG_PROJECT", "Your API key belongs to a different LegendKeeper project. Choose it again in Settings.");
     }
-    if (!match) {
-      throw new HttpError(404, "PROJECT_NOT_CONFIGURED", "This server has no API key for that LegendKeeper project.");
-    }
-    return match;
-  }
-
-  async clientFor(projectId: string): Promise<LkClient> {
-    return (await this.entryFor(projectId)).client;
+    return project;
   }
 }
 
@@ -164,6 +144,7 @@ export function toSearchHits(results: LkSearchResult[]): SearchHit[] {
 
 interface CachedPage {
   details: PageDetails;
+  content: PageContent;
   images: Map<string, ExtractedImage>;
 }
 
@@ -173,6 +154,10 @@ export interface FetchedImage {
 }
 
 export interface PageServiceOptions {
+  /** LegendKeeper's origin, for keyless (public) requests. */
+  lkBaseUrl: string;
+  /** Test hook for keyless requests. */
+  lkFetch?: typeof fetch;
   pageTtlMs?: number;
   searchTtlMs?: number;
   pageListTtlMs?: number;
@@ -195,9 +180,10 @@ export class PageService {
   private readonly pageFlight = new InFlight<string, CachedPage>();
   private readonly imageFlight = new InFlight<string, FetchedImage>();
   private readonly fetchImage: ImageFetcher;
+  private readonly anonymous: LkClient;
 
   constructor(
-    private readonly registry: ProjectRegistry,
+    private readonly projects: ProjectResolver,
     private readonly options: PageServiceOptions,
   ) {
     this.pages = new TtlCache({ ttlMs: options.pageTtlMs ?? 60_000, maxEntries: 200 });
@@ -210,13 +196,15 @@ export class PageService {
       weigh: (img) => img.body.length,
     });
     this.fetchImage = options.fetchImage;
+    this.anonymous = new LkClient({ baseUrl: options.lkBaseUrl, fetch: options.lkFetch });
   }
 
-  async search(projectId: string, query: string, limit: number): Promise<SearchResponse> {
-    const key = `${projectId}\u0000${limit}\u0000${query.toLowerCase()}`;
+  async search(caller: Caller, projectId: string, query: string, limit: number): Promise<SearchResponse> {
+    const key = `${caller.keyId}\u0000${projectId}\u0000${limit}\u0000${query.toLowerCase()}`;
     const cached = this.searches.get(key);
     if (cached) return cached;
-    const client = await this.registry.clientFor(projectId);
+    await this.projects.require(caller, projectId);
+    const client = caller.client;
     try {
       const list = await client.get<LkList<LkSearchResult>>(`/api/v3/projects/${encodeURIComponent(projectId)}/search`, {
         q: query,
@@ -232,26 +220,48 @@ export class PageService {
   }
 
   /**
-   * Every page of a project, for matching tokens to pages. The "gm" list uses
-   * the API key, so hidden pages are included and flagged. The "public" list
-   * is fetched without a key: exactly what an anonymous visitor can see, and
-   * empty for a private project.
+   * Every page of the caller's project, hidden ones included and flagged, for
+   * matching tokens and text to pages. Fetched with the caller's key.
    */
-  async pageList(projectId: string, audience: PageListAudience, fresh = false): Promise<PageList> {
-    const key = `${audience}/${projectId}`;
+  async pageList(caller: Caller, projectId: string, fresh = false): Promise<PageList> {
+    const key = `gm/${caller.keyId}/${projectId}`;
     if (!fresh) {
       const cached = this.pageLists.get(key);
       if (cached) return cached;
     }
     const list = await this.listFlight.run(key, async () => {
-      // The public list needs no password, so an unknown id must not cost a LegendKeeper call.
-      const { project, client } = await this.registry.entryFor(projectId, audience === "gm");
+      const project = await this.projects.require(caller, projectId);
       const summary = { id: project.id, name: project.name, isPublic: project.isPublic ?? false };
-      if (audience === "public" && !summary.isPublic) return buildPageList(summary, [], audience);
       try {
-        const { resources, truncated } = await this.listResources(audience === "gm" ? client : client.anonymous(), projectId);
-        return buildPageList(summary, resources, audience, truncated);
+        const { resources, truncated } = await this.listResources(caller.client, projectId);
+        return buildPageList(summary, resources, "gm", truncated);
       } catch (err) {
+        throw mapUpstreamError(err, new HttpError(404, "PROJECT_NOT_CONFIGURED", "Project not found."));
+      }
+    });
+    this.pageLists.set(key, list);
+    return list;
+  }
+
+  /**
+   * A project's public pages, for players, fetched from LegendKeeper without
+   * a key: exactly what an anonymous visitor can see. A project that refuses
+   * anonymous visitors (a private one) gives an empty, non-public list.
+   */
+  async publicPageList(projectId: string): Promise<PageList> {
+    const key = `public/${projectId}`;
+    const cached = this.pageLists.get(key);
+    if (cached) return cached;
+    const list = await this.listFlight.run(key, async () => {
+      // Anonymous visitors can't read the project's name; the extension shows the room's.
+      const summary = { id: projectId, name: projectId, isPublic: true };
+      try {
+        const { resources, truncated } = await this.listResources(this.anonymous, projectId);
+        return buildPageList(summary, resources, "public", truncated);
+      } catch (err) {
+        if (err instanceof LkApiError && [401, 403, 404].includes(err.status)) {
+          return buildPageList({ ...summary, isPublic: false }, [], "public");
+        }
         throw mapUpstreamError(err, new HttpError(404, "PROJECT_NOT_CONFIGURED", "Project not found."));
       }
     });
@@ -274,10 +284,11 @@ export class PageService {
     return { resources, truncated: true };
   }
 
-  private async load(projectId: string, resourceId: string): Promise<CachedPage> {
-    const client = await this.registry.clientFor(projectId);
+  private async load(caller: Caller, projectId: string, resourceId: string): Promise<CachedPage> {
+    await this.projects.require(caller, projectId);
+    const client = caller.client;
     const base = `/api/v3/projects/${encodeURIComponent(projectId)}/resources/${encodeURIComponent(resourceId)}`;
-    const notFound = new HttpError(404, "PAGE_NOT_FOUND", "This page no longer exists or the server's key cannot see it.");
+    const notFound = new HttpError(404, "PAGE_NOT_FOUND", "This page no longer exists or your API key cannot see it.");
     let resource: LkResource;
     try {
       resource = await client.get<LkResource>(base);
@@ -324,27 +335,48 @@ export class PageService {
       warnings,
       fetchedAt: new Date().toISOString(),
     };
-    return { details, images: new Map(extracted.images.map((img) => [img.id, img])) };
+    const content: PageContent = {
+      projectId,
+      id: resource.id,
+      name: resource.name,
+      aliases: resource.aliases ?? [],
+      tags: resource.tags ?? [],
+      sidebar: await toContent(resource.properties ?? []),
+      documents: await Promise.all(
+        documents.map(async ({ doc, blocks }) => ({
+          id: doc.id,
+          name: doc.name,
+          blocks: blocks ? await toContent(blocks) : [],
+          ...(blocks ? {} : { failed: true }),
+        })),
+      ),
+      otherDocuments: (resource.documents ?? [])
+        .filter((d) => !d.deletedAt && d.type !== "page" && d.type !== "blank")
+        .map((d) => d.name),
+      warnings,
+      fetchedAt: details.fetchedAt,
+    };
+    return { details, content, images: new Map(extracted.images.map((img) => [img.id, img])) };
   }
 
-  async getPage(projectId: string, resourceId: string, fresh = false): Promise<CachedPage> {
-    const key = `${projectId}/${resourceId}`;
+  async getPage(caller: Caller, projectId: string, resourceId: string, fresh = false): Promise<CachedPage> {
+    const key = `${caller.keyId}/${projectId}/${resourceId}`;
     if (!fresh) {
       const cached = this.pages.get(key);
       if (cached) return cached;
     }
-    const page = await this.pageFlight.run(key, () => this.load(projectId, resourceId));
+    const page = await this.pageFlight.run(key, () => this.load(caller, projectId, resourceId));
     this.pages.set(key, page);
     return page;
   }
 
   /** Image bytes for an image that belongs to the given page. */
-  async getImage(projectId: string, resourceId: string, imageId: string): Promise<FetchedImage> {
-    let page = await this.getPage(projectId, resourceId);
+  async getImage(caller: Caller, projectId: string, resourceId: string, imageId: string): Promise<FetchedImage> {
+    let page = await this.getPage(caller, projectId, resourceId);
     let image = page.images.get(imageId);
     if (!image) {
       // The page may have changed since it was cached.
-      page = await this.getPage(projectId, resourceId, true);
+      page = await this.getPage(caller, projectId, resourceId, true);
       image = page.images.get(imageId);
     }
     if (!image) throw new HttpError(404, "IMAGE_NOT_FOUND", "That image is no longer on this page.");

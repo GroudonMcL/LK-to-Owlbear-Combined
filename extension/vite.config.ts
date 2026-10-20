@@ -20,6 +20,7 @@ export default defineConfig({
         background: resolve(__dirname, "background.html"),
         picker: resolve(__dirname, "picker.html"),
         panel: resolve(__dirname, "panel.html"),
+        textmenu: resolve(__dirname, "textmenu.html"),
         tab: resolve(__dirname, "tab.html"),
       },
     },
