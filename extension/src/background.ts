@@ -11,7 +11,7 @@ import { linksForPlacedItems, loadAssetLinks } from "./lib/assetLinks";
 import { syncRoomIndex } from "./lib/existing";
 import { LINK_KEY, parseLink } from "./lib/links";
 import { describeOpenError, linkToken, openForToken } from "./lib/open";
-import { loadPageList } from "./lib/pageLists";
+import { loadPageList, PAGE_LIST_STATUS_KEY, readStatus } from "./lib/pageLists";
 import { publishProject } from "./lib/project";
 import { loadSettings, requestNavigation, SETTINGS_STORAGE_KEY } from "./lib/settings";
 import { PageMatcher, type ItemTextMatches } from "./lib/textMatch";
@@ -124,11 +124,11 @@ async function setTextMenu(matches: ItemTextMatches[]): Promise<void> {
   });
 }
 
-async function scanText(items?: Item[], fresh = false): Promise<void> {
+async function scanText(items?: Item[]): Promise<void> {
   try {
     if (!(await OBR.scene.isReady())) return setTextMenu([]);
     const role = await OBR.player.getRole();
-    const list = await loadPageList(obrPlatform, role, fresh);
+    const list = await loadPageList(obrPlatform, role);
     if (textMatcher?.pages !== list.pages) textMatcher = new PageMatcher(list.pages);
     await setTextMenu(textMatcher.matchItems(items ?? (await OBR.scene.items.getItems())));
   } catch {
@@ -137,9 +137,9 @@ async function scanText(items?: Item[], fresh = false): Promise<void> {
   }
 }
 
-function scheduleTextScan(items?: Item[], fresh = false): void {
+function scheduleTextScan(items?: Item[]): void {
   clearTimeout(textTimer);
-  textTimer = setTimeout(() => void scanText(items, fresh), 400);
+  textTimer = setTimeout(() => void scanText(items), 400);
 }
 
 // Room project ------------------------------------------------------------
@@ -301,11 +301,13 @@ OBR.onReady(async () => {
   void syncRoomProject();
   // The popover (another frame of this extension) saved new settings.
   window.addEventListener("storage", (e) => {
+    if (e.key === PAGE_LIST_STATUS_KEY && readStatus()?.state === "ready") scheduleTextScan();
     if (e.key !== SETTINGS_STORAGE_KEY) return;
     void syncRoomProject();
     scheduleTextScan();
   });
-  OBR.broadcast.onMessage(CH_PAGES_REFRESHED, () => scheduleTextScan(undefined, true));
+  // A new page list (shared through storage): match against it.
+  OBR.broadcast.onMessage(CH_PAGES_REFRESHED, () => scheduleTextScan());
   // A player's page list depends on the project the GM records on the room.
   OBR.room.onMetadataChange(() => scheduleTextScan());
   OBR.broadcast.onMessage(CH_PLACE, (event) => void startPlacement(event.data as PlacementRequest));

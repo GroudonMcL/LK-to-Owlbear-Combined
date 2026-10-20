@@ -23,6 +23,13 @@ export interface HandlerDeps {
 }
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** LegendKeeper's opaque list cursor, passed back as it came. */
+function listCursor(url: URL): string {
+  const cursor = url.searchParams.get("cursor") ?? "";
+  if (cursor.length > 2048) throw badRequest("Invalid cursor.");
+  return cursor;
+}
 const IMAGE_ID_PATTERN = /^[a-f0-9]{16,64}$/;
 const MAX_QUERY_LENGTH = 200;
 const MAX_TOKEN_DIMENSION = 2048;
@@ -178,13 +185,13 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
       return json(200, body, cors);
     }
 
-    // GET /api/public/projects/:projectId/page-list: players' page list.
+    // GET /api/public/projects/:projectId/resources?cursor=: players' page list, a chunk at a time.
     // Public by design: it is fetched from LegendKeeper without a key, so it
     // holds only what LegendKeeper shows anonymous visitors anyway.
-    if (parts[1] === "public" && parts[2] === "projects" && parts[4] === "page-list" && parts.length === 5 && method === "GET") {
+    if (parts[1] === "public" && parts[2] === "projects" && parts[4] === "resources" && parts.length === 5 && method === "GET") {
       if (!ID_PATTERN.test(parts[3])) throw badRequest("Invalid project id.");
       rateLimit(`ip:${request.headers.get("cf-connecting-ip") ?? "local"}`);
-      return json(200, await pages.publicPageList(parts[3]), cors);
+      return json(200, await pages.publicResourceChunk(parts[3], listCursor(url)), cors);
     }
 
     const caller = await authenticate(request);
@@ -199,9 +206,9 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
       const projectId = parts[2];
       if (!ID_PATTERN.test(projectId)) throw badRequest("Invalid project id.");
 
-      // GET /api/projects/:projectId/page-list[?fresh=1]: the GM's page list, hidden pages included.
-      if (parts[3] === "page-list" && parts.length === 4 && method === "GET") {
-        return json(200, await pages.pageList(caller, projectId, url.searchParams.get("fresh") === "1"), cors);
+      // GET /api/projects/:projectId/resources?cursor=[&fresh=1]: the GM's page list, a chunk at a time.
+      if (parts[3] === "resources" && parts.length === 4 && method === "GET") {
+        return json(200, await pages.resourceChunk(caller, projectId, listCursor(url), url.searchParams.get("fresh") === "1"), cors);
       }
 
       // GET /api/projects/:projectId/search?q=&limit=

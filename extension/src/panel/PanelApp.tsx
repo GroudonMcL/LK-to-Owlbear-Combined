@@ -7,6 +7,7 @@
 import { ArrowLeft, ChevronLeft, ChevronRight, EyeOff, House, PenLine, SquareArrowOutUpRight, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Role } from "../lib/pageLists";
+import { savePanelWidth } from "../lib/panelWidth";
 import { publicPageUrl, tabUrl } from "../lib/urls";
 import { PANEL_POPOVER_ID } from "../platform/channels";
 import type { Platform } from "../platform/types";
@@ -82,6 +83,7 @@ export function PanelApp({ platform }: { platform: Platform }) {
 
   return (
     <div className="app">
+      <ResizeHandle platform={platform} />
       <AppHeader title={<span title={current.name}>{current.name}</span>} sub="LegendKeeper">
         {trail.length > 0 && (
           <IconButton label="Back" onClick={() => setTrail((t) => t.slice(0, -1))}>
@@ -117,6 +119,65 @@ export function PanelApp({ platform }: { platform: Platform }) {
       )}
       {body}
     </div>
+  );
+}
+
+/**
+ * A grip along the panel's left edge: drag it to make the panel wider or
+ * narrower. The panel is pinned to the right, so it grows to the left. The
+ * width is remembered in this browser for the next page opened.
+ */
+function ResizeHandle({ platform }: { platform: Platform }) {
+  const drag = useRef<{ startX: number; startWidth: number; width: number; frame: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    // screenX doesn't move with the panel as it resizes, unlike clientX.
+    drag.current = { startX: e.screenX, startWidth: window.innerWidth, width: window.innerWidth, frame: 0 };
+    setDragging(true);
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    d.width = d.startWidth - (e.screenX - d.startX);
+    if (d.frame) return;
+    d.frame = requestAnimationFrame(() => {
+      d.frame = 0;
+      void platform.resizeSidePanel(PANEL_POPOVER_ID, d.width).catch(() => undefined);
+    });
+  };
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    drag.current = null;
+    setDragging(false);
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    if (d.frame) cancelAnimationFrame(d.frame);
+    void platform
+      .resizeSidePanel(PANEL_POPOVER_ID, d.width)
+      .then(savePanelWidth)
+      .catch(() => undefined);
+  };
+
+  return (
+    <>
+      <div
+        className="panel-resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Drag to resize the panel"
+        title="Drag to resize"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      />
+      {/* Keeps the framed LegendKeeper page from swallowing the pointer mid-drag. */}
+      {dragging && <div className="panel-resize-shield" />}
+    </>
   );
 }
 

@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { buildPageList } from "@lkob/shared";
 import { loadConfig } from "../src/core/config.js";
 import { createHandler, VERSION } from "../src/core/handler.js";
 import { LkClient } from "../src/core/lk/client.js";
@@ -65,6 +66,7 @@ async function start(options: { hosting?: boolean } = {}) {
     const projects = new ProjectResolver();
     const pages = new PageService(projects, {
       lkBaseUrl: lk.baseUrl,
+      listRequestsPerChunk: 2,
       maxSourceImageBytes: config.maxSourceImageBytes,
       assetHostAllowlist: null,
       allowInsecureAssetFetch: true,
@@ -191,8 +193,8 @@ describe("projects and search", () => {
 
   it("never answers one key from another key's cache", async () => {
     expect((await api(`/api/projects/${PROJECT_ID}/pages/goblin`)).status).toBe(200);
-    expect((await api(`/api/projects/${PROJECT_ID}/page-list`)).status).toBe(200);
-    for (const path of [`/api/projects/${PROJECT_ID}/pages/goblin`, `/api/projects/${PROJECT_ID}/page-list`, `/api/projects/${PROJECT_ID}/pages/goblin/content`]) {
+    expect((await api(`/api/projects/${PROJECT_ID}/resources`)).status).toBe(200);
+    for (const path of [`/api/projects/${PROJECT_ID}/pages/goblin`, `/api/projects/${PROJECT_ID}/resources`, `/api/projects/${PROJECT_ID}/pages/goblin/content`]) {
       const res = await api(path, {}, OTHER_API_KEY);
       expect(res.status).toBe(403);
       expect((await res.json()).error.code).toBe("WRONG_PROJECT");
@@ -360,36 +362,55 @@ describe("token hosting", () => {
   });
 });
 
-describe("page lists", () => {
-  it("gives the GM every page, hidden ones flagged, following LegendKeeper's cursor", async () => {
-    const res = await api(`/api/projects/${PROJECT_ID}/page-list?fresh=1`);
+/** Follows a resource listing's cursors, as the extension does, and builds the page list. */
+async function collect(path: string, key: string | null, fresh = false) {
+  const resources = [];
+  let project = null;
+  let cursor = "";
+  let chunks = 0;
+  for (;;) {
+    const q = new URLSearchParams({ cursor, ...(fresh ? { fresh: "1" } : {}) });
+    const res = key ? await api(`${path}?${q}`, {}, key) : await fetch(`${base}${path}?${q}`);
     expect(res.status).toBe(200);
-    const list = await res.json();
-    expect(list).toMatchObject({ projectId: PROJECT_ID, projectName: "The Test Realm", isPublic: false, audience: "gm", truncated: false });
-    const byId = Object.fromEntries(list.pages.map((p: { id: string }) => [p.id, p]));
+    const chunk = await res.json();
+    chunks++;
+    project = chunk.project;
+    resources.push(...chunk.resources);
+    if (!chunk.nextCursor) break;
+    cursor = chunk.nextCursor;
+  }
+  return { chunks, project, list: buildPageList(project, resources, key ? "gm" : "public") };
+}
+
+describe("page lists", () => {
+  it("gives the GM every page in chunks, hidden ones flagged, following LegendKeeper's cursor", async () => {
+    const { chunks, project, list } = await collect(`/api/projects/${PROJECT_ID}/resources`, API_KEY, true);
+    expect(project).toEqual({ id: PROJECT_ID, name: "The Test Realm", isPublic: false });
+    const byId = Object.fromEntries(list.pages.map((p) => [p.id, p]));
     expect(byId.goblin).toEqual({ id: "goblin", name: "Goblin Boss", aliases: ["Boss"], tags: ["monster", "goblinoid"], path: ["Bestiary"], hidden: false, iconColor: null });
     expect(byId.villain).toMatchObject({ path: ["The Cabal"], hidden: true, aliases: ["The Hollow Queen"] });
     expect(byId.tpl).toBeUndefined(); // templates are not pages
-    // The mock serves two resources per request.
+    // The mock serves two resources per request; the Node server here makes two requests per chunk.
     expect(lk.requests.filter((r) => r.endsWith("/resources")).length).toBeGreaterThan(3);
+    if (runtime === "node") expect(chunks).toBeGreaterThan(1);
   });
 
-  it("caches the GM list unless asked for a fresh one", async () => {
-    await api(`/api/projects/${PROJECT_ID}/page-list`);
+  it("caches chunks unless asked for fresh ones", async () => {
+    await collect(`/api/projects/${PROJECT_ID}/resources`, API_KEY);
     lk.requests.length = 0;
-    await api(`/api/projects/${PROJECT_ID}/page-list`);
+    await collect(`/api/projects/${PROJECT_ID}/resources`, API_KEY);
     expect(lk.requests).toEqual([]);
   });
 
-  it("requires an API key for the GM list", async () => {
-    const res = await fetch(`${base}/api/projects/${PROJECT_ID}/page-list`);
-    expect(res.status).toBe(401);
+  it("requires an API key for the GM list, and rejects absurd cursors", async () => {
+    expect((await fetch(`${base}/api/projects/${PROJECT_ID}/resources`)).status).toBe(401);
+    expect((await api(`/api/projects/${PROJECT_ID}/resources?cursor=${"x".repeat(3000)}`)).status).toBe(400);
   });
 
   it("gives players an empty public list for a private project, without any key", async () => {
-    const res = await fetch(`${base}/api/public/projects/${PROJECT_ID}/page-list`);
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ isPublic: false, audience: "public", pages: [] });
+    const { project, list } = await collect(`/api/public/projects/${PROJECT_ID}/resources`, null);
+    expect(project.isPublic).toBe(false);
+    expect(list.pages).toEqual([]);
   });
 
   it("lists a public project's public pages keylessly, so hidden ones never appear", async () => {
@@ -397,13 +418,13 @@ describe("page lists", () => {
     await stop();
     await start(); // a fresh server forgets the cached private answer
     try {
-      const list = await (await fetch(`${base}/api/public/projects/${PROJECT_ID}/page-list`)).json();
-      expect(list).toMatchObject({ isPublic: true, audience: "public" });
-      const ids = list.pages.map((p: { id: string }) => p.id);
+      const { project, list } = await collect(`/api/public/projects/${PROJECT_ID}/resources`, null);
+      expect(project.isPublic).toBe(true);
+      const ids = list.pages.map((p) => p.id);
       expect(ids).toContain("goblin");
       expect(ids).not.toContain("cabal");
       expect(ids).not.toContain("villain");
-      expect(list.pages.every((p: { hidden: boolean }) => !p.hidden)).toBe(true);
+      expect(list.pages.every((p) => !p.hidden)).toBe(true);
     } finally {
       lk.setPublic(false);
       await stop();
@@ -412,12 +433,12 @@ describe("page lists", () => {
   });
 
   it("asks LegendKeeper anonymously, sending no key, and caches the answer", async () => {
-    const res = await fetch(`${base}/api/public/projects/proj_unknown/page-list`, { headers: { Authorization: `Bearer ${API_KEY}` } });
-    expect(await res.json()).toMatchObject({ isPublic: false, pages: [] });
+    const res = await fetch(`${base}/api/public/projects/proj_unknown/resources`, { headers: { Authorization: `Bearer ${API_KEY}` } });
+    expect(await res.json()).toMatchObject({ project: { isPublic: false }, resources: [], nextCursor: null });
     lk.requests.length = 0;
-    await fetch(`${base}/api/public/projects/proj_unknown/page-list`);
+    await fetch(`${base}/api/public/projects/proj_unknown/resources`);
     expect(lk.requests).toEqual([]);
-    expect((await fetch(`${base}/api/public/projects/bad%20id/page-list`)).status).toBe(400);
+    expect((await fetch(`${base}/api/public/projects/bad%20id/resources`)).status).toBe(400);
   });
 });
 

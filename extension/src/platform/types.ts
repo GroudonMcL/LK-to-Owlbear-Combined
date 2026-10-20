@@ -80,6 +80,8 @@ export interface Platform {
   /** A full-height panel pinned to the viewport's right edge that stays open on click-away; replaces one with the same id. */
   openSidePanel(id: string, url: string, maxWidth: number): Promise<void>;
   closeSidePanel(id: string): Promise<void>;
+  /** Sets the side panel's width (it grows to the left), within what fits on screen; returns the width set. */
+  resizeSidePanel(id: string, width: number): Promise<number>;
   /** Opens this extension's toolbar popover. */
   openAction(): Promise<void>;
   /** Opens Owlbear's dialog to save a token to the GM's storage. Owlbear reports nothing back. */

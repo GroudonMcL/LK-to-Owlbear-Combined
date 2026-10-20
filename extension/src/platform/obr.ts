@@ -36,6 +36,9 @@ function shared<T>(subscribe: (cb: (value: T) => void) => () => void): (cb: (val
 const onItemsChange = shared<Item[]>((cb) => OBR.scene.items.onChange(cb));
 const onSceneReadyChange = shared<boolean>((cb) => OBR.scene.onReadyChange(cb));
 
+const PANEL_MARGIN = 8;
+const MIN_PANEL_WIDTH = 320;
+
 export const obrPlatform: Platform = {
   kind: "owlbear",
 
@@ -97,7 +100,7 @@ export const obrPlatform: Platform = {
   closeModal: (id) => OBR.modal.close(id),
 
   async openSidePanel(id, url, maxWidth) {
-    const margin = 8;
+    const margin = PANEL_MARGIN;
     const [width, height] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]);
     // Re-opening replaces whatever the panel was showing.
     await OBR.popover.close(id);
@@ -115,6 +118,12 @@ export const obrPlatform: Platform = {
     });
   },
   closeSidePanel: (id) => OBR.popover.close(id),
+  async resizeSidePanel(id, width) {
+    const fits = Math.max(MIN_PANEL_WIDTH, (await OBR.viewport.getWidth()) - 2 * PANEL_MARGIN);
+    const next = Math.round(Math.min(fits, Math.max(MIN_PANEL_WIDTH, width)));
+    await OBR.popover.setWidth(id, next);
+    return next;
+  },
   openAction: () => OBR.action.open(),
 
   async saveToOwlbearStorage(spec) {

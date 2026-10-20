@@ -115,8 +115,8 @@ describe("the client only calls endpoints the spec defines", () => {
     await pages.search(caller, PROJECT_ID, "goblin", 25);
     const page = await pages.getPage(caller, PROJECT_ID, "goblin");
     await pages.getImage(caller, PROJECT_ID, "goblin", page.details.images[0].id);
-    await pages.pageList(caller, PROJECT_ID);
-    await pages.publicPageList(PROJECT_ID);
+    await pages.resourceChunk(caller, PROJECT_ID, "");
+    await pages.publicResourceChunk(PROJECT_ID, "");
 
     const apiCalls = lk.requests.filter((r) => r.includes("/api/"));
     expect(apiCalls.length).toBeGreaterThan(3);

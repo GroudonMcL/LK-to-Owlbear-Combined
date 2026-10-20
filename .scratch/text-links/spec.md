@@ -20,10 +20,13 @@ LegendKeeper API key out of the repository's secrets and into the extension's Se
      pages (a context menu embed). Items without matches don't get the entry.
    - The toolbar popover: **In this scene** (GM) / **Named in this scene** (players)
      lists every match, grouped by item. Clicking an item's name selects it on the map.
-3. **Opening a match.** The GM gets the side panel showing the page as read from
-   LegendKeeper's API (`/api/projects/:p/pages/:r/content`): hidden pages, secrets and
-   sidebar included, images through the page-scoped proxy, mentions open in place. A
-   switch shows the public view instead when the project is public.
+3. **Opening a match.** Exactly like **Open LK Page** on a token: LegendKeeper's page in
+   the side panel (or a new tab, per person). The GM can switch the panel to the page as
+   read from LegendKeeper's API (`/api/projects/:p/pages/:r/content`): secrets and
+   sidebar included, images through the page-scoped proxy, mentions open in place.
+   Hidden pages open that way, since the public view can't show them. *(Changed after
+   first use: the API view was the default at first, and the GM wanted the real page.)*
+   The panel can be resized by dragging its left edge (`OBR.popover.setWidth`).
 4. **Settings.** The GM pastes their LegendKeeper API key. It is kept in the browser's
    localStorage only, never in room or scene metadata. A key opens exactly one project,
    which is selected automatically. **Refresh page list** reloads the list everywhere
@@ -40,6 +43,13 @@ LegendKeeper API key out of the repository's secrets and into the extension's Se
   uses it for that request, and every cache is keyed by a digest of the key, so one key's
   answers (hidden pages, say) never answer another. Token uploads also need a key
   LegendKeeper accepts.
+- **Page lists in chunks.** A project of 13,000 pages needs ~130 list calls: more than one
+  Worker request may make (50 on Cloudflare's free plan) and slower than a browser request
+  should wait. The Worker serves `/resources?cursor=` chunks of 15 calls; the browser
+  follows the cursor, builds the list (`shared/src/pageList.ts`) and keeps it in local
+  storage for every frame, with a shared status ("loading pages…", "13,154 pages, updated
+  just now"). One frame loads at a time; lists older than 10 minutes are used at once and
+  refreshed behind.
 - **Players' list without keys.** The Worker lists a project's resources anonymously.
   A project that refuses anonymous visitors gives an empty, non-public list.
 - **Menu filter.** Context-menu filters can't call into the extension, so the background

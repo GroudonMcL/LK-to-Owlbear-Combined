@@ -1,8 +1,9 @@
 import type {
   PageContent,
   PageDetails,
-  PageList,
+  ListedResource,
   ProjectsResponse,
+  ResourceChunk,
   ProjectSummary,
   SearchHit,
   SearchResponse,
@@ -13,7 +14,6 @@ import { sniffImageMime, type RasterMime } from "./imageSniff.js";
 import { LkApiError, LkClient, LkNetworkError } from "./lk/client.js";
 import { toContent } from "./lk/content.js";
 import { extractPage, type ExtractedImage } from "./lk/extract.js";
-import { buildPageList } from "./lk/pageList.js";
 import type {
   LkDocumentBlocks,
   LkList,
@@ -161,6 +161,8 @@ export interface PageServiceOptions {
   pageTtlMs?: number;
   searchTtlMs?: number;
   pageListTtlMs?: number;
+  /** LegendKeeper list calls (100 resources each) per chunk. */
+  listRequestsPerChunk?: number;
   maxSourceImageBytes: number;
   assetHostAllowlist: string[] | null;
   allowInsecureAssetFetch: boolean;
@@ -168,14 +170,19 @@ export interface PageServiceOptions {
 }
 
 const MAX_PAGE_DOCUMENTS = 8;
-/** listResources pages of 100 fetched for one page list: up to 5,000 pages. */
-const MAX_LIST_REQUESTS = 50;
+/**
+ * listResources calls (100 resources each) per chunk. With the project lookup
+ * this stays well under Cloudflare's 50 outbound calls per request, and a
+ * chunk answers in a few seconds.
+ */
+const LIST_REQUESTS_PER_CHUNK = 15;
 
 export class PageService {
   private readonly pages: TtlCache<string, CachedPage>;
   private readonly searches: TtlCache<string, SearchResponse>;
-  private readonly pageLists: TtlCache<string, PageList>;
-  private readonly listFlight = new InFlight<string, PageList>();
+  private readonly chunks: TtlCache<string, ResourceChunk>;
+  private readonly chunkFlight = new InFlight<string, ResourceChunk>();
+  private readonly listRequestsPerChunk: number;
   private readonly images: TtlCache<string, FetchedImage>;
   private readonly pageFlight = new InFlight<string, CachedPage>();
   private readonly imageFlight = new InFlight<string, FetchedImage>();
@@ -188,7 +195,8 @@ export class PageService {
   ) {
     this.pages = new TtlCache({ ttlMs: options.pageTtlMs ?? 60_000, maxEntries: 200 });
     this.searches = new TtlCache({ ttlMs: options.searchTtlMs ?? 30_000, maxEntries: 200 });
-    this.pageLists = new TtlCache({ ttlMs: options.pageListTtlMs ?? 60_000, maxEntries: 20 });
+    this.chunks = new TtlCache({ ttlMs: options.pageListTtlMs ?? 5 * 60_000, maxEntries: 60 });
+    this.listRequestsPerChunk = options.listRequestsPerChunk ?? LIST_REQUESTS_PER_CHUNK;
     this.images = new TtlCache({
       ttlMs: 10 * 60_000,
       maxEntries: 300,
@@ -220,68 +228,81 @@ export class PageService {
   }
 
   /**
-   * Every page of the caller's project, hidden ones included and flagged, for
-   * matching tokens and text to pages. Fetched with the caller's key.
+   * One slice of the caller's project's resource listing, hidden ones
+   * included, starting at `cursor` ("" for the start). The browser follows
+   * `nextCursor` and builds the page list itself: a big project needs more
+   * LegendKeeper calls than one Worker request may make (50 on Cloudflare's
+   * free plan) and more time than one browser request should wait.
    */
-  async pageList(caller: Caller, projectId: string, fresh = false): Promise<PageList> {
-    const key = `gm/${caller.keyId}/${projectId}`;
+  async resourceChunk(caller: Caller, projectId: string, cursor: string, fresh = false): Promise<ResourceChunk> {
+    const key = `gm/${caller.keyId}/${projectId}/${cursor}`;
     if (!fresh) {
-      const cached = this.pageLists.get(key);
+      const cached = this.chunks.get(key);
       if (cached) return cached;
     }
-    const list = await this.listFlight.run(key, async () => {
+    const chunk = await this.chunkFlight.run(key, async () => {
       const project = await this.projects.require(caller, projectId);
-      const summary = { id: project.id, name: project.name, isPublic: project.isPublic ?? false };
       try {
-        const { resources, truncated } = await this.listResources(caller.client, projectId);
-        return buildPageList(summary, resources, "gm", truncated);
+        const { resources, nextCursor } = await this.listResources(caller.client, projectId, cursor);
+        return { project: { id: project.id, name: project.name, isPublic: project.isPublic ?? false }, resources, nextCursor };
       } catch (err) {
         throw mapUpstreamError(err, new HttpError(404, "PROJECT_NOT_CONFIGURED", "Project not found."));
       }
     });
-    this.pageLists.set(key, list);
-    return list;
+    this.chunks.set(key, chunk);
+    return chunk;
   }
 
   /**
-   * A project's public pages, for players, fetched from LegendKeeper without
-   * a key: exactly what an anonymous visitor can see. A project that refuses
-   * anonymous visitors (a private one) gives an empty, non-public list.
+   * A slice of a project's public pages, for players, fetched from
+   * LegendKeeper without a key: exactly what an anonymous visitor can see. A
+   * project that refuses anonymous visitors (a private one) gives an empty,
+   * non-public slice.
    */
-  async publicPageList(projectId: string): Promise<PageList> {
-    const key = `public/${projectId}`;
-    const cached = this.pageLists.get(key);
+  async publicResourceChunk(projectId: string, cursor: string): Promise<ResourceChunk> {
+    const key = `public/${projectId}/${cursor}`;
+    const cached = this.chunks.get(key);
     if (cached) return cached;
-    const list = await this.listFlight.run(key, async () => {
+    const chunk = await this.chunkFlight.run(key, async () => {
       // Anonymous visitors can't read the project's name; the extension shows the room's.
-      const summary = { id: projectId, name: projectId, isPublic: true };
+      const project = { id: projectId, name: projectId, isPublic: true };
       try {
-        const { resources, truncated } = await this.listResources(this.anonymous, projectId);
-        return buildPageList(summary, resources, "public", truncated);
+        const { resources, nextCursor } = await this.listResources(this.anonymous, projectId, cursor);
+        return { project, resources, nextCursor };
       } catch (err) {
         if (err instanceof LkApiError && [401, 403, 404].includes(err.status)) {
-          return buildPageList({ ...summary, isPublic: false }, [], "public");
+          return { project: { ...project, isPublic: false }, resources: [], nextCursor: null };
         }
         throw mapUpstreamError(err, new HttpError(404, "PROJECT_NOT_CONFIGURED", "Project not found."));
       }
     });
-    this.pageLists.set(key, list);
-    return list;
+    this.chunks.set(key, chunk);
+    return chunk;
   }
 
-  private async listResources(client: LkClient, projectId: string): Promise<{ resources: LkResourceListItem[]; truncated: boolean }> {
-    const resources: LkResourceListItem[] = [];
-    let cursor: string | undefined;
-    for (let request = 0; request < MAX_LIST_REQUESTS; request++) {
+  private async listResources(client: LkClient, projectId: string, cursor: string): Promise<{ resources: ListedResource[]; nextCursor: string | null }> {
+    const resources: ListedResource[] = [];
+    let next: string | undefined = cursor || undefined;
+    for (let request = 0; request < this.listRequestsPerChunk; request++) {
       const page = await client.get<LkList<LkResourceListItem>>(`/api/v3/projects/${encodeURIComponent(projectId)}/resources`, {
         limit: 100,
-        cursor,
+        cursor: next,
       });
-      resources.push(...(page.data ?? []));
-      cursor = page.nextCursor ?? undefined;
-      if (!cursor) return { resources, truncated: false };
+      for (const r of page.data ?? []) {
+        resources.push({
+          id: r.id,
+          name: r.name,
+          parentId: r.parentId ?? null,
+          tags: r.tags ?? [],
+          aliases: r.aliases ?? [],
+          isHidden: Boolean(r.isHidden),
+          iconColor: r.iconColor ?? null,
+        });
+      }
+      next = page.nextCursor ?? undefined;
+      if (!next) return { resources, nextCursor: null };
     }
-    return { resources, truncated: true };
+    return { resources, nextCursor: next ?? null };
   }
 
   private async load(caller: Caller, projectId: string, resourceId: string): Promise<CachedPage> {
