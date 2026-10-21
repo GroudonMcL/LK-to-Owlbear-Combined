@@ -13,6 +13,7 @@ export type FrameStyle =
   | "riveted"
   | "hammered"
   | "burnished"
+  | "stamped"
   | "stampedColour"
   | "stampedGrey";
 
@@ -79,6 +80,7 @@ export interface FramePreset {
 
 /** A small, cohesive set: a few excellent frames beats many inconsistent ones. */
 export const FRAME_PRESETS: FramePreset[] = [
+  { id: "stamped", name: "Stamped", style: { frame: "stamped", frameColor: "#d7671f", borderWidth: 0.14, margin: 0.03 } },
   // Artwork frames (imageFrames.ts): circles of a fixed thickness.
   { id: "stamped-colour", name: "Stamped Colour", style: { frame: "stampedColour", frameColor: "#d7671f", borderWidth: 0.2, margin: 0 } },
   { id: "stamped-grey", name: "Stamped Grey", style: { frame: "stampedGrey", frameColor: "#9a9a9a", borderWidth: 0.2, margin: 0 } },

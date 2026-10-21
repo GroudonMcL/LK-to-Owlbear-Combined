@@ -2,6 +2,7 @@ import { createCanvas, loadImage, type Canvas } from "@napi-rs/canvas";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { setFrameImage } from "../src/editor/imageFrames";
+import { toHex, toHsl } from "../src/editor/color";
 import { describe, expect, it } from "vitest";
 import { applyAdjustments, removeFlatBackground } from "../src/editor/adjust";
 import type { Ctx } from "../src/editor/frames";
@@ -277,5 +278,33 @@ describe("artwork frames", () => {
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       for (let r = 0; r <= 120; r++) expect(alphaAt(img, 128 + dx * r, 128 + dy * r)).toBe(255);
     }
+  });
+});
+
+describe("Stamped (drawn)", () => {
+  const warmPixels = (colour: string) => {
+    const style: TokenStyle = { ...DEFAULT_STYLE, ...FRAME_PRESETS[0].style, frameColor: colour, backingColor: "#808080", backingOpacity: 1 };
+    const img = render(256, null, style, DEFAULT_TRANSFORM);
+    let warm = 0;
+    for (let y = 0; y < 256; y++) {
+      for (let x = 0; x < 256; x++) {
+        const d = Math.hypot(x - 127.5, y - 127.5) / 128;
+        if (d < 0.84 || d > 0.96 || alphaAt(img, x, y) < 250) continue;
+        const [r, g, b] = rgbAt(img, x, y);
+        const { h, s, l } = toHsl(toHex({ r, g, b }));
+        if ((h < 50 || h > 340) && s > 0.35 && l > 0.12 && l < 0.9) warm++;
+      }
+    }
+    return warm;
+  };
+
+  it("is the first frame, and the default", () => {
+    expect(FRAME_PRESETS[0].id).toBe("stamped");
+    expect(DEFAULT_STYLE.frame).toBe("stamped");
+  });
+
+  it("recolours completely: a blue ring keeps no orange or red", () => {
+    expect(warmPixels("#d7671f")).toBeGreaterThan(1000); // the original is mostly warm
+    expect(warmPixels("#2f6bd7")).toBe(0);
   });
 });
