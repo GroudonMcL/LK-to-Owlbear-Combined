@@ -1,7 +1,6 @@
 // Crop maths: where the image sits inside the frame, how far it may move and
 // how small it may get before an empty corner would show.
 
-import { IMAGE_FRAME_CLIP, isImageFrame } from "./imageFrames";
 import { DEFAULT_TRANSFORM, effectiveShape, ZOOM_MAX, type ImageTransform, type TokenStyle } from "./model";
 import { boundingBox, shapePolygon, type Point } from "./shapes";
 
@@ -25,12 +24,7 @@ export function computeInsets(style: TokenStyle): Insets {
     frameOuter,
     frameInner,
     backing: frameOuter + border / 2,
-    image:
-      style.padding > 0
-        ? frameInner + style.padding
-        : isImageFrame(style.frame)
-          ? 1 - (1 - frameOuter) * IMAGE_FRAME_CLIP
-          : frameOuter + border / 2,
+    image: style.padding > 0 ? frameInner + style.padding : frameOuter + border / 2,
   };
 }
 
@@ -135,6 +129,7 @@ export function resetTransform(w: number, h: number, clip: Point[]): ImageTransf
 export function initialTransform(w: number, h: number, clip: Point[]): ImageTransform {
   const base = resetTransform(w, h, clip);
   if (h <= w * 1.15) return base;
-  const topAligned = clampTransform({ ...base, offsetY: 10 }, w, h, clip);
+  // How far up the image can go while still covering the frame, whether or not it is locked.
+  const topAligned = clampTransform({ ...base, lockFill: true, offsetY: 10 }, w, h, clip);
   return { ...base, offsetY: topAligned.offsetY * 0.6 };
 }

@@ -158,6 +158,7 @@ export const obrPlatform: Platform = {
   sendLocal: (channel, data) => OBR.broadcast.sendMessage(channel, data, { destination: "LOCAL" }),
   sendToRoom: (channel, data) => OBR.broadcast.sendMessage(channel, data, { destination: "REMOTE" }),
   playerName: () => OBR.player.getName(),
+  playerId: async () => OBR.player.id,
   onLocal: (channel, cb) => OBR.broadcast.onMessage(channel, (event) => cb(event.data)),
 
   getTheme: async () => themeInfo(await OBR.theme.getTheme()),

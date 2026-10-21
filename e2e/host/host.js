@@ -11,7 +11,7 @@
   const params = new URLSearchParams(location.search);
   const EXT = params.get("ext") || "http://127.0.0.1:8787";
   const ROOM = "e2e-room";
-  const USER = "gm-user";
+  const USER = params.get("role") === "player" ? "player-user" : "gm-user";
   const SCENE_DPI = 150;
   const LIMIT = 16 * 1024;
 
@@ -160,6 +160,7 @@
   const handlers = {
     OBR_PLAYER_GET_ROLE: () => ({ role: state.role }),
     OBR_PLAYER_GET_ID: () => ({ id: USER }),
+    OBR_PLAYER_GET_NAME: () => ({ name: state.role === "GM" ? "Game Master" : "Pip" }),
     OBR_PLAYER_GET_SELECTION: () => ({ selection: state.selection }),
     OBR_PLAYER_SELECT: (_f, d) => {
       state.selection = d.replace === false ? [...state.selection, ...d.items] : d.items;
@@ -507,6 +508,12 @@
       el.style.height = `${menu.embed.height ?? 100}px`;
       document.body.appendChild(el);
       loadFrame(`embed:${menuId}`, menu.embed.url, el);
+    },
+    /** A broadcast from another browser in the room arrives (the test relays them). */
+    deliver(channel, data) {
+      for (const frame of frames.values()) {
+        if (frame.channels.has(channel)) post(frame, `OBR_BROADCAST_MESSAGE_${channel}`, { data, connectionId: "remote" });
+      }
     },
     clickContextMenu(menuId, itemIds) {
       const items = state.items.filter((i) => itemIds.includes(i.id));

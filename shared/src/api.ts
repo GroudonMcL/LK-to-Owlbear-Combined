@@ -102,6 +102,12 @@ export interface PageDetails {
   fetchedAt: string;
 }
 
+/** A pass the GM's browser asks for and hands to a player: it opens public pages only. */
+export interface PlayerPassResponse {
+  pass: string;
+  expiresAt: string;
+}
+
 export interface TokenUploadResponse {
   url: string;
   hash: string;

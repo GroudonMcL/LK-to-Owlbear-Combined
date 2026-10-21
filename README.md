@@ -69,9 +69,10 @@ time it connects.
   - **Owlbear panel**: a full-height panel on the right showing LegendKeeper's read-only
     public view, with **back**, **home** and **forward** buttons floating over its top bar
     for following links between pages. Drag its left edge to make it wider or narrower;
-    it remembers the width. The GM gets an **Edit in LegendKeeper** button that
-    opens the page in the full app; players get **Open in LegendKeeper** (the public view
-    in a tab).
+    it remembers the width. **Edit in LegendKeeper** opens the page in the full app,
+    for the GM and for players who are members of the project with edit rights
+    (LegendKeeper decides who gets in). Players also get **Open in LegendKeeper** (the
+    public view in a tab).
   - **New tab**: the full app for the GM, where pages can be edited and DM notes read;
     the public view for players.
 - **Editing pages.** LegendKeeper's app sends `X-Frame-Options: DENY`, so it can't be
@@ -128,6 +129,24 @@ only see public pages, as always. When a player clicks it, the GM is asked to ap
 first. LegendKeeper's public view is another site in a frame, so the extension can't
 read or set where it is scrolled: everyone opens the page at the top.
 
+### Players making tokens
+
+A player can search the project's public pages and make tokens from their art, once the
+GM allows it:
+
+- In the toolbar popover, the player presses **Ask the GM** under **Make tokens**. The GM
+  sees a dialog and chooses **Allow** or **Not now**.
+- On **Allow**, the GM's browser asks the Worker for a **player pass** and sends it to that
+  player. The pass is not the API key or the access password. It opens public pages only,
+  for 12 hours, and the Worker can tell it is genuine. Changing `LKOB_ACCESS_TOKENS`
+  withdraws every pass at once.
+- The player searches the public page list (hidden pages never appear) and opens a page
+  to see its art. The Worker leaves out **hidden tabs, hidden sidebar fields and secret
+  blocks**, so art that only the GM can see is never offered.
+- The token editor works as it does for the GM, except that the token is always
+  **visible** and is saved to the player's **own Owlbear storage**. The player drags it
+  from Owlbear's Assets panel onto the map. Owlbear storage needs an Owlbear account.
+
 ### Token importer (GM)
 
 - **Search & images.** Search your LegendKeeper project, open a page, and see every image
@@ -143,10 +162,22 @@ read or set where it is scrolled: everyone opens the page at the top.
   data and failed lookups are all handled explicitly.
 - **Token editor.** A large live preview with drag, wheel or pinch zoom around the
   cursor, rotation, flip, fit/fill/reset, and a dimmed view of the art outside the frame.
-  There are five shapes and eleven procedural frames (including hammered *Forged steel*
-  and gold-to-copper *Ember gold*, both with a drop shadow) with colour, thickness, spacing,
-  backing and opacity, plus brightness/contrast/saturation and flat-background removal.
-  The export comes from the same renderer as the preview.
+  There are five shapes and about forty frames, in four groups, all built the way
+  **Stamped** (the default) is: a band lit from the top left, a pressed-in inner step, a
+  drop shadow and a shadow cast onto the art.
+  - **Classic**: Stamped, Gilded, Silver, Engraved, Iron-bound, Forged steel, Ember gold,
+    Arcane, Infernal, Double line and Polished.
+  - **Textures**: Oak, Cobblestone, Rope, Dragon scale, Vines, Frost, Magma, Harlequin,
+    Knotwork, Starfield and Ossuary.
+  - **Classes**: one per D&D class, Barbarian to Wizard, plus Artificer.
+  - **Strange**: Mimic, Beholder, Gelatinous and Candy cane.
+
+  Every frame takes any colour, thickness, spacing, backing and opacity. Outer spacing
+  starts at 10%, which leaves room for the drop shadow. **Keep the frame filled** starts
+  off, so the art can be moved freely. There are also brightness/contrast/saturation
+  controls and flat-background removal. The export comes from the same renderer as the
+  preview. To see every frame on one sheet, run
+  `npx tsx extension/scripts/frame-sheet.ts frames.png`.
 - **Automatic size.** A `Size` field, a `Size: Large` line, or a statblock line such as
   `Large dragon, chaotic evil` sets the footprint: Tiny ½, Small/Medium 1, Large 2,
   Huge 3, Gargantuan 4 (configurable). You can always override it.
@@ -301,6 +332,13 @@ extension. Code layout:
   are refused. Bodies are size-capped and sniffed. Set `LK_ASSET_HOSTS` (a Worker variable)
   to pin LegendKeeper's asset host.
 - Private page art reaches the editor as `blob:` URLs and never gets a public URL.
+- **Player passes** are signed by the Worker with a key derived from `LKOB_ACCESS_TOKENS`.
+  Each names one project and expires after 12 hours. A pass opens only
+  `/api/player/projects/<project>/pages/…` for pages in the stored public list, with
+  hidden tabs, hidden sidebar fields and secret blocks removed. It can't search with the
+  API key, read hidden pages, upload tokens or build lists. The GM's answer is broadcast
+  to the room's browsers and only the asking player keeps it. Another player could copy it,
+  but it gives them nothing they couldn't ask for themselves.
 - The **finished token** is the one image made public: every player's browser has to load
   it. It is published only when the GM presses *Create token* (which needs the access
   password), stored under the SHA-256 of its bytes (unguessable,
@@ -333,7 +371,7 @@ extension. Code layout:
 
 ```sh
 npm install
-npm test                 # 341 unit/integration tests
+npm test                 # 383 unit/integration tests
 npm run typecheck
 npm run build:cloudflare && npm run e2e   # end-to-end in the Workers runtime (needs Chromium)
 ```
@@ -346,7 +384,7 @@ npm run build:cloudflare && npm run e2e   # end-to-end in the Workers runtime (n
   and the deploy helpers.
 - `npm run e2e` runs the production bundle with the real `@owlbear-rodeo/sdk`, served by
   `wrangler dev` (workerd), inside an **Owlbear host emulator** that speaks the SDK's
-  message protocol from another origin. 104 checks cover the GM's import, page-link and
+  message protocol from another origin. 114 checks cover the GM's import, page-link and
   scene-text workflows and a player's. Screenshots go to `e2e/output/`. Set `CHROMIUM_PATH` to use a
   locally installed Chromium.
 - UI work without Owlbear: `npm run demo` (mock LegendKeeper + API on :8787) and

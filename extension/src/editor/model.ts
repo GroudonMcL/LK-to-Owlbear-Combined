@@ -1,21 +1,12 @@
+import type { FinishStyle } from "./finishes";
+
 // Token editor state. All lengths are fractions of the token's half-size R, so
 // the same settings render identically at preview and export resolution.
 
 export type ShapeId = "circle" | "rounded" | "square" | "hexagon" | "hexagonFlat";
 
-export type FrameStyle =
-  | "none"
-  | "line"
-  | "double"
-  | "gilded"
-  | "engraved"
-  | "arcane"
-  | "riveted"
-  | "hammered"
-  | "burnished"
-  | "stamped"
-  | "stampedColour"
-  | "stampedGrey";
+/** "none", Stamped, or one of the finishes in finishes.ts. */
+export type FrameStyle = "none" | "stamped" | FinishStyle;
 
 export interface TokenStyle {
   shape: ShapeId;
@@ -61,7 +52,7 @@ export const DEFAULT_TRANSFORM: ImageTransform = {
   offsetY: 0,
   rotation: 0,
   flipX: false,
-  lockFill: true,
+  lockFill: false,
 };
 
 export const DEFAULT_ADJUSTMENTS: ImageAdjustments = {
@@ -72,30 +63,72 @@ export const DEFAULT_ADJUSTMENTS: ImageAdjustments = {
   backgroundTolerance: 18,
 };
 
+export type FrameGroup = "Classic" | "Textures" | "Classes" | "Strange";
+
 export interface FramePreset {
   id: string;
   name: string;
+  group: FrameGroup;
   style: Pick<TokenStyle, "frame" | "frameColor" | "borderWidth" | "margin">;
 }
 
-/** A small, cohesive set: a few excellent frames beats many inconsistent ones. */
+/** Stamped's thickness, and room around it for its drop shadow. */
+const BAND = { borderWidth: 0.14, margin: 0.1 };
+
+function preset(id: string, name: string, group: FrameGroup, frame: FrameStyle, frameColor: string): FramePreset {
+  return { id, name, group, style: { frame, frameColor, ...BAND } };
+}
+
 export const FRAME_PRESETS: FramePreset[] = [
-  { id: "stamped", name: "Stamped", style: { frame: "stamped", frameColor: "#d7671f", borderWidth: 0.14, margin: 0.03 } },
-  // Artwork frames (imageFrames.ts): circles of a fixed thickness.
-  { id: "stamped-colour", name: "Stamped Colour", style: { frame: "stampedColour", frameColor: "#d7671f", borderWidth: 0.2, margin: 0 } },
-  { id: "stamped-grey", name: "Stamped Grey", style: { frame: "stampedGrey", frameColor: "#9a9a9a", borderWidth: 0.2, margin: 0 } },
-  { id: "gilded", name: "Gilded", style: { frame: "gilded", frameColor: "#d4a64a", borderWidth: 0.1, margin: 0.04 } },
-  { id: "silver", name: "Silver", style: { frame: "gilded", frameColor: "#b8c2cf", borderWidth: 0.1, margin: 0.04 } },
-  { id: "engraved", name: "Engraved", style: { frame: "engraved", frameColor: "#7a7f8a", borderWidth: 0.12, margin: 0.04 } },
-  { id: "bronze", name: "Iron-bound", style: { frame: "riveted", frameColor: "#9a6a3c", borderWidth: 0.12, margin: 0.04 } },
-  { id: "forged", name: "Forged steel", style: { frame: "hammered", frameColor: "#7c8088", borderWidth: 0.14, margin: 0.06 } },
-  { id: "ember", name: "Ember gold", style: { frame: "burnished", frameColor: "#d7671f", borderWidth: 0.14, margin: 0.06 } },
-  { id: "arcane", name: "Arcane", style: { frame: "arcane", frameColor: "#6fc3ff", borderWidth: 0.07, margin: 0.11 } },
-  { id: "infernal", name: "Infernal", style: { frame: "arcane", frameColor: "#ff6a3d", borderWidth: 0.07, margin: 0.11 } },
-  { id: "double", name: "Double line", style: { frame: "double", frameColor: "#e8d6a8", borderWidth: 0.08, margin: 0.02 } },
-  { id: "minimal", name: "Minimal", style: { frame: "line", frameColor: "#f4f1ea", borderWidth: 0.045, margin: 0.01 } },
-  { id: "none", name: "No frame", style: { frame: "none", frameColor: "#ffffff", borderWidth: 0, margin: 0 } },
+  preset("stamped", "Stamped", "Classic", "stamped", "#d7671f"),
+  preset("gilded", "Gilded", "Classic", "gilded", "#d4a64a"),
+  preset("silver", "Silver", "Classic", "gilded", "#b8c2cf"),
+  preset("engraved", "Engraved", "Classic", "engraved", "#7a7f8a"),
+  preset("bronze", "Iron-bound", "Classic", "riveted", "#9a6a3c"),
+  preset("forged", "Forged steel", "Classic", "hammered", "#7c8088"),
+  preset("ember", "Ember gold", "Classic", "burnished", "#d7671f"),
+  preset("arcane", "Arcane", "Classic", "arcane", "#6fc3ff"),
+  preset("infernal", "Infernal", "Classic", "arcane", "#ff6a3d"),
+  preset("double", "Double line", "Classic", "double", "#c9b27a"),
+  preset("minimal", "Polished", "Classic", "line", "#8a8f99"),
+  { id: "none", name: "No frame", group: "Classic", style: { frame: "none", frameColor: "#ffffff", borderWidth: 0, margin: 0 } },
+
+  preset("oak", "Oak", "Textures", "wood", "#8a5a32"),
+  preset("cobblestone", "Cobblestone", "Textures", "stone", "#8b8579"),
+  preset("rope", "Rope", "Textures", "rope", "#b08a52"),
+  preset("dragon-scale", "Dragon scale", "Textures", "scales", "#3f8a5a"),
+  preset("vines", "Vines", "Textures", "vines", "#5f9a3a"),
+  preset("frost", "Frost", "Textures", "frost", "#7fb8e0"),
+  preset("magma", "Magma", "Textures", "magma", "#ff7a1a"),
+  preset("harlequin", "Harlequin", "Textures", "harlequin", "#8c2f4a"),
+  preset("knotwork", "Knotwork", "Textures", "braid", "#c9a24a"),
+  preset("starfield", "Starfield", "Textures", "starfield", "#6a5ad8"),
+  preset("ossuary", "Ossuary", "Textures", "bones", "#e2d6b8"),
+
+  preset("barbarian", "Barbarian", "Classes", "claws", "#8a5a3a"),
+  preset("bard", "Bard", "Classes", "notes", "#8e3b8f"),
+  preset("cleric", "Cleric", "Classes", "radiant", "#e0b84a"),
+  preset("druid", "Druid", "Classes", "vines", "#6aa83a"),
+  preset("fighter", "Fighter", "Classes", "riveted", "#8c929c"),
+  preset("monk", "Monk", "Classes", "beads", "#c4622c"),
+  preset("paladin", "Paladin", "Classes", "holy", "#c9d2de"),
+  preset("ranger", "Ranger", "Classes", "fletching", "#4f6b3a"),
+  preset("rogue", "Rogue", "Classes", "stitched", "#4a3f3c"),
+  preset("sorcerer", "Sorcerer", "Classes", "scales", "#b8322a"),
+  preset("warlock", "Warlock", "Classes", "eyes", "#5b2d7a"),
+  preset("wizard", "Wizard", "Classes", "arcane", "#3f6fd8"),
+  preset("artificer", "Artificer", "Classes", "clockwork", "#b5813a"),
+
+  preset("mimic", "Mimic", "Strange", "teeth", "#a8323c"),
+  preset("beholder", "Beholder", "Strange", "beholder", "#7a3a5a"),
+  preset("gelatinous", "Gelatinous", "Strange", "slime", "#7fc24a"),
+  preset("candy", "Candy cane", "Strange", "candy", "#d6262e"),
 ];
+
+export const FRAME_GROUPS: FrameGroup[] = ["Classic", "Textures", "Classes", "Strange"];
+
+/** Every frame style there is, for checking saved settings. */
+export const FRAME_STYLES = new Set<string>(["none", "stamped", ...FRAME_PRESETS.map((p) => p.style.frame)]);
 
 export const DEFAULT_STYLE: TokenStyle = {
   shape: "circle",
@@ -106,9 +139,8 @@ export const DEFAULT_STYLE: TokenStyle = {
   frameOpacity: 1,
 };
 
-/** Artwork frames are circles, whatever shape is chosen. */
 export function effectiveShape(style: Pick<TokenStyle, "shape" | "frame">): ShapeId {
-  return style.frame === "stampedColour" || style.frame === "stampedGrey" ? "circle" : style.shape;
+  return style.shape;
 }
 
 export const SHAPES: { id: ShapeId; name: string }[] = [

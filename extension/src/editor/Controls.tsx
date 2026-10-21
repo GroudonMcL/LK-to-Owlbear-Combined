@@ -8,6 +8,7 @@ import { useAuthedImage } from "../ui/useAuthedImage";
 import { isValidHex } from "./color";
 import {
   effectiveShape,
+  FRAME_GROUPS,
   FRAME_PRESETS,
   SHAPES,
   type ExportSize,
@@ -17,7 +18,6 @@ import {
   type ShapeId,
   type TokenStyle,
 } from "./model";
-import { isImageFrame } from "./imageFrames";
 import { renderToken, type RenderSource } from "./render";
 import { shapePolygon } from "./shapes";
 
@@ -189,24 +189,24 @@ export function Controls(props: {
   output: OutputSettings;
   onOutput: (patch: Partial<OutputSettings>) => void;
   hostingAvailable: boolean;
+  /** A player: tokens are always visible and saved to their own Owlbear storage. */
+  player?: boolean;
 }) {
   const { style, onStyle, transform, onTransform, adjustments, onAdjustments, token, onToken, output, onOutput } = props;
   const pct = (v: number) => `${Math.round(v * 100)}%`;
   const preset = FRAME_PRESETS.find((p) => p.id === props.presetId);
-  const artworkFrame = isImageFrame(style.frame);
   const detected = props.detectedSize;
 
   return (
     <div className="panel-scroll scroll">
       <Section icon={<Frame className="lead" />} title="Frame & shape" note={preset?.name ?? "Custom"} open>
-        <div className="shape-row" role="group" aria-label="Shape" title={artworkFrame ? "This frame is a circle" : undefined}>
+        <div className="shape-row" role="group" aria-label="Shape">
           {SHAPES.map((s) => (
             <button
               key={s.id}
               type="button"
               className="shape-btn"
               aria-pressed={effectiveShape(style) === s.id}
-              disabled={artworkFrame}
               onClick={() => onStyle({ shape: s.id })}
             >
               <ShapeGlyph shape={s.id} />
@@ -214,26 +214,26 @@ export function Controls(props: {
             </button>
           ))}
         </div>
-        <div className="preset-grid" role="group" aria-label="Frame style">
-          {FRAME_PRESETS.map((p) => (
-            <button key={p.id} type="button" className="preset" aria-pressed={props.presetId === p.id} onClick={() => props.onPreset(p)}>
-              <PresetPreview preset={p} style={style} source={props.source} transform={transform} />
-              {p.name}
-            </button>
-          ))}
-        </div>
+        {FRAME_GROUPS.map((group) => (
+          <div key={group} className="stack" style={{ gap: 6 }}>
+            <div className="eyebrow">{group}</div>
+            <div className="preset-grid" role="group" aria-label={`${group} frames`}>
+              {FRAME_PRESETS.filter((p) => p.group === group).map((p) => (
+                <button key={p.id} type="button" className="preset" aria-pressed={props.presetId === p.id} onClick={() => props.onPreset(p)}>
+                  <PresetPreview preset={p} style={style} source={props.source} transform={transform} />
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </Section>
 
       <Section icon={<Paintbrush className="lead" />} title="Border & backing">
         {style.frame !== "none" && (
           <>
-            {/* Artwork frames bring their own colours and thickness. */}
-            {!artworkFrame && (
-              <>
-                <ColorPicker label="Border colour" value={style.frameColor} colors={FRAME_COLORS} onChange={(frameColor) => onStyle({ frameColor })} />
-                <Slider label="Thickness" min={0.01} max={0.25} step={0.005} value={style.borderWidth} format={pct} onChange={(borderWidth) => onStyle({ borderWidth })} />
-              </>
-            )}
+            <ColorPicker label="Border colour" value={style.frameColor} colors={FRAME_COLORS} onChange={(frameColor) => onStyle({ frameColor })} />
+            <Slider label="Thickness" min={0.01} max={0.25} step={0.005} value={style.borderWidth} format={pct} onChange={(borderWidth) => onStyle({ borderWidth })} />
             <Slider label="Frame opacity" min={0.1} max={1} step={0.05} value={style.frameOpacity} format={pct} onChange={(frameOpacity) => onStyle({ frameOpacity })} />
           </>
         )}
@@ -338,32 +338,38 @@ export function Controls(props: {
             ]}
           />
         </Field>
-        <label className="check">
-          <input type="checkbox" checked={!token.visible} onChange={(e) => onToken({ visible: !e.target.checked })} />
-          Hidden from players
-        </label>
+        {!props.player && (
+          <label className="check">
+            <input type="checkbox" checked={!token.visible} onChange={(e) => onToken({ visible: !e.target.checked })} />
+            Hidden from players
+          </label>
+        )}
       </Section>
 
       <Section icon={<Settings2 className="lead" />} title="Output" note={`${output.exportSize} px`}>
         <Field label="Resolution" hint="512 px is crisp for tokens up to Huge.">
           <Segmented label="Resolution" fill value={output.exportSize} onChange={(exportSize) => onOutput({ exportSize })} options={[256, 512, 1024].map((n) => ({ value: n as ExportSize, label: `${n} px` }))} />
         </Field>
-        <Field
-          label="Image hosting"
-          hint={output.hosting === "owlbear" ? "Owlbear asks where to save the token. Then drag it from Assets onto the map; it links to this page." : undefined}
-        >
-          <Segmented
+        {props.player ? (
+          <div className="small muted">Owlbear asks where to save the token in your storage. Then drag it from Assets onto the map; it links to this page.</div>
+        ) : (
+          <Field
             label="Image hosting"
-            fill
-            value={output.hosting}
-            onChange={(hosting) => onOutput({ hosting })}
-            options={[
-              { value: "backend", label: props.hostingAvailable ? "Extension server" : "Server (off)" },
-              { value: "owlbear", label: "Owlbear storage" },
-            ]}
-          />
-        </Field>
-        {output.hosting === "backend" && (
+            hint={output.hosting === "owlbear" ? "Owlbear asks where to save the token. Then drag it from Assets onto the map; it links to this page." : undefined}
+          >
+            <Segmented
+              label="Image hosting"
+              fill
+              value={output.hosting}
+              onChange={(hosting) => onOutput({ hosting })}
+              options={[
+                { value: "backend", label: props.hostingAvailable ? "Extension server" : "Server (off)" },
+                { value: "owlbear", label: "Owlbear storage" },
+              ]}
+            />
+          </Field>
+        )}
+        {!props.player && output.hosting === "backend" && (
           <Field label="Placement">
             <Segmented
               label="Placement"

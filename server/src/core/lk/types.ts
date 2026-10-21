@@ -63,6 +63,7 @@ export interface LkResource {
   tags: string[];
   aliases: string[];
   parentId?: string;
+  isHidden?: boolean;
   imageUrl?: string;
   banner?: { enabled: boolean; url: string; yPosition: number };
   documents: LkDocument[];

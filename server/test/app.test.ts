@@ -518,6 +518,70 @@ describe("page lists", () => {
   });
 });
 
+describe("players' pages", () => {
+  let pass = "";
+  const player = (path: string, token = pass) => fetch(base + path, { headers: { Authorization: `Bearer ${token}`, Origin: "https://ext.example" } });
+
+  beforeAll(async () => {
+    lk.setPublic(true);
+    await build(PROJECT_ID, "public");
+    const res = await api("/api/player-pass", { method: "POST", body: JSON.stringify({ projectId: PROJECT_ID }) });
+    expect(res.status).toBe(200);
+    ({ pass } = await res.json());
+  });
+
+  afterAll(() => lk.setPublic(false));
+
+  it("issues passes only to the GM, for projects the server has a key for", async () => {
+    expect((await fetch(`${base}/api/player-pass`, { method: "POST", body: JSON.stringify({ projectId: PROJECT_ID }) })).status).toBe(401);
+    const unknown = await api("/api/player-pass", { method: "POST", body: JSON.stringify({ projectId: "proj_nobody" }) });
+    expect(unknown.status).toBe(404);
+    expect(pass).toMatch(/^pp1\./);
+  });
+
+  it("serves a public page and its images to a pass", async () => {
+    const res = await player(`/api/player/projects/${PROJECT_ID}/pages/goblin`);
+    expect(res.status).toBe(200);
+    const page = await res.json();
+    expect(page).toMatchObject({ id: "goblin", name: "Goblin Boss" });
+    expect(page.images.length).toBeGreaterThan(2);
+    const image = await player(`/api/player/projects/${PROJECT_ID}/pages/goblin/images/${page.images[0].id}`);
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/png");
+  });
+
+  it("leaves out secret blocks, hidden tabs and hidden sidebar fields", async () => {
+    const gmDragon = await (await api(`/api/projects/${PROJECT_ID}/pages/dragon?fresh=1`)).json();
+    expect(gmDragon.images.map((i: { label: string }) => i.label)).toEqual(expect.arrayContaining(["Red dragon art", "Lair plan"]));
+    const dragon = await (await player(`/api/player/projects/${PROJECT_ID}/pages/dragon`)).json();
+    expect(dragon.images).toEqual([]);
+    expect(dragon.documents.map((d: { name: string }) => d.name)).toEqual(["Statblock"]);
+    // The GM's image ids don't open anything for a player.
+    const secret = await player(`/api/player/projects/${PROJECT_ID}/pages/dragon/images/${gmDragon.images[0].id}`);
+    expect(secret.status).toBe(404);
+    const village = await (await player(`/api/player/projects/${PROJECT_ID}/pages/village`)).json();
+    expect(village.images).toEqual([]);
+  });
+
+  it("refuses pages that aren't public", async () => {
+    const res = await player(`/api/player/projects/${PROJECT_ID}/pages/villain`);
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.message).toMatch(/isn't public/);
+  });
+
+  it("refuses forged, missing or misplaced credentials", async () => {
+    const forged = pass.slice(0, -4) + (pass.endsWith("AAAA") ? "BBBB" : "AAAA");
+    expect((await player(`/api/player/projects/${PROJECT_ID}/pages/goblin`, forged)).status).toBe(401);
+    expect((await player(`/api/player/projects/${PROJECT_ID}/pages/goblin`, PASSWORD)).status).toBe(401);
+    expect((await fetch(`${base}/api/player/projects/${PROJECT_ID}/pages/goblin`)).status).toBe(401);
+    // A pass opens nothing of the GM's.
+    expect((await player(`/api/projects/${PROJECT_ID}/pages/goblin`)).status).toBe(401);
+    expect((await player(`/api/projects`)).status).toBe(401);
+    // Nor another project.
+    expect((await player(`/api/player/projects/${OTHER_PROJECT_ID}/pages/goblin`)).status).toBe(401);
+  });
+});
+
 describe("secrets", () => {
   it("never echoes the LegendKeeper key in any response", async () => {
     const responses = await Promise.all([

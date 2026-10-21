@@ -1,7 +1,4 @@
-import { createCanvas, loadImage, type Canvas } from "@napi-rs/canvas";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { setFrameImage } from "../src/editor/imageFrames";
+import { createCanvas, type Canvas } from "@napi-rs/canvas";
 import { toHex, toHsl } from "../src/editor/color";
 import { describe, expect, it } from "vitest";
 import { applyAdjustments, removeFlatBackground } from "../src/editor/adjust";
@@ -49,6 +46,9 @@ const rgbAt = (img: { data: Uint8ClampedArray; size: number }, x: number, y: num
   const i = (y * img.size + x) * 4;
   return [img.data[i], img.data[i + 1], img.data[i + 2]];
 };
+
+/** The crop held so the image always covers the frame ("Keep the frame filled"). */
+const LOCKED: ImageTransform = { ...DEFAULT_TRANSFORM, lockFill: true };
 
 const bare: TokenStyle = { ...DEFAULT_STYLE, frame: "none", borderWidth: 0, margin: 0, padding: 0, backingOpacity: 0 };
 
@@ -119,7 +119,7 @@ describe("crop geometry", () => {
     const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) * 2 - 1;
     for (let i = 0; i < 200; i++) {
       const t = clampTransform(
-        { ...DEFAULT_TRANSFORM, rotation, zoom: 0.2 + Math.abs(rand()) * 3, offsetX: rand() * 3, offsetY: rand() * 3 },
+        { ...LOCKED, rotation, zoom: 0.2 + Math.abs(rand()) * 3, offsetX: rand() * 3, offsetY: rand() * 3 },
         w,
         h,
         poly,
@@ -160,7 +160,7 @@ describe("renderToken", () => {
     for (const [w, h] of [[300, 900], [1600, 400]]) {
       const source = solidSource(w, h);
       const style = { ...bare, shape: "circle" as ShapeId };
-      const t = clampTransform({ ...DEFAULT_TRANSFORM, offsetX: 5, offsetY: -5, zoom: 0.1 }, w, h, imageClipPolygon(style));
+      const t = clampTransform({ ...LOCKED, offsetX: 5, offsetY: -5, zoom: 0.1 }, w, h, imageClipPolygon(style));
       const img = render(200, source, style, t);
       const inner = shapePolygon("circle", 100, 2).map((p) => ({ x: p.x + 100, y: p.y + 100 }));
       for (let y = 0; y < 200; y += 3) {
@@ -212,7 +212,11 @@ describe("renderToken", () => {
     const img = render(200, solidSource(100, 100), style, DEFAULT_TRANSFORM);
     const insets = computeInsets(style);
     const y = Math.round(100 * (insets.frameInner + style.padding / 2)); // depth from the top edge
-    expect(rgbAt(img, 100, y)).toEqual([0, 255, 0]);
+    // The frame's inner shadow may dim it a touch.
+    const [r, g, b] = rgbAt(img, 100, y);
+    expect(r).toBeLessThan(10);
+    expect(g).toBeGreaterThan(235);
+    expect(b).toBeLessThan(10);
     expect(rgbAt(img, 100, 100)).toEqual([255, 0, 0]);
   });
 
@@ -264,19 +268,26 @@ describe("adjustments", () => {
   });
 });
 
-describe("artwork frames", () => {
-  it("draw the ring over the art with no gap, always as a circle", async () => {
-    const ring = await loadImage(readFileSync(path.join(__dirname, "../public/frames/stamped-colour.webp")));
-    setFrameImage("stampedColour", ring as unknown as CanvasImageSource);
-    const preset = FRAME_PRESETS.find((p) => p.id === "stamped-colour")!;
-    // Square chosen, but the frame is a circle: the corners stay clear.
-    const style: TokenStyle = { ...DEFAULT_STYLE, ...preset.style, shape: "square", backingOpacity: 0 };
-    const img = render(256, solidSource(100, 100, "#00ff00"), style, DEFAULT_TRANSFORM);
-    expect(alphaAt(img, 2, 2)).toBe(0);
-    expect(rgbAt(img, 128, 128)).toEqual([0, 255, 0]);
-    // Every pixel from the centre out to the ring is covered, in all four directions.
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      for (let r = 0; r <= 120; r++) expect(alphaAt(img, 128 + dx * r, 128 + dy * r)).toBe(255);
+describe("frame defaults", () => {
+  it("leave room for the drop shadow and don't lock the crop", () => {
+    expect(DEFAULT_STYLE.margin).toBe(0.1);
+    expect(DEFAULT_TRANSFORM.lockFill).toBe(false);
+  });
+
+  it("give every frame preset Stamped's thickness and spacing", () => {
+    for (const preset of FRAME_PRESETS.filter((p) => p.style.frame !== "none")) {
+      expect(preset.style).toMatchObject({ borderWidth: 0.14, margin: 0.1 });
+    }
+  });
+
+  it("keep the drop shadow inside the canvas on every side", () => {
+    for (const preset of FRAME_PRESETS) {
+      const style: TokenStyle = { ...DEFAULT_STYLE, ...preset.style, backingOpacity: 0 };
+      const img = render(200, null, style, DEFAULT_TRANSFORM);
+      // The shadow has faded out by the outermost row and column on the right and bottom.
+      let edge = 0;
+      for (let i = 0; i < 200; i++) edge = Math.max(edge, alphaAt(img, 199, i), alphaAt(img, i, 199));
+      expect(edge, preset.id).toBeLessThan(32);
     }
   });
 });
@@ -289,7 +300,7 @@ describe("Stamped (drawn)", () => {
     for (let y = 0; y < 256; y++) {
       for (let x = 0; x < 256; x++) {
         const d = Math.hypot(x - 127.5, y - 127.5) / 128;
-        if (d < 0.84 || d > 0.96 || alphaAt(img, x, y) < 250) continue;
+        if (d < 0.77 || d > 0.89 || alphaAt(img, x, y) < 250) continue;
         const [r, g, b] = rgbAt(img, x, y);
         const { h, s, l } = toHsl(toHex({ r, g, b }));
         if ((h < 50 || h > 340) && s > 0.35 && l > 0.12 && l < 0.9) warm++;

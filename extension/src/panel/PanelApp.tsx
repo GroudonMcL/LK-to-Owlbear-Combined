@@ -10,7 +10,7 @@ import type { Role } from "../lib/pageLists";
 import { savePanelWidth } from "../lib/panelWidth";
 import { openPicker } from "../lib/open";
 import { askToOpenForEveryone, openForEveryone } from "../lib/share";
-import { publicPageUrl, tabUrl } from "../lib/urls";
+import { appPageUrl, publicPageUrl, tabUrl } from "../lib/urls";
 import { PANEL_POPOVER_ID } from "../platform/channels";
 import type { Platform } from "../platform/types";
 import { AppHeader, Empty, IconButton, Segmented, useTheme } from "../ui/components";
@@ -58,8 +58,10 @@ export function PanelApp({ platform }: { platform: Platform }) {
   const effective: View = role === "GM" && (view === "content" || !isPublic || currentHidden) ? "content" : "public";
   const canSwitch = role === "GM" && isPublic && !currentHidden && trail.length === 0;
 
-  // The GM's link opens the full app, with DM notes.
+  // The GM's link opens the full app, with DM notes; players' the public view.
   const fullPageUrl = tabUrl(role ?? "PLAYER", projectId, current.resourceId, isPublic);
+  // Everyone may try the editor: LegendKeeper lets in project members who may edit.
+  const appUrl = appPageUrl(projectId, current.resourceId);
 
   let body;
   if (role === null) body = <main className="app-body" />;
@@ -94,11 +96,10 @@ export function PanelApp({ platform }: { platform: Platform }) {
             <ArrowLeft />
           </IconButton>
         )}
-        {role === "GM" ? (
-          <a className="btn btn-sm btn-collapse" href={fullPageUrl} target="_blank" rel="noopener noreferrer" aria-label="Edit in LegendKeeper" title="Open the page in LegendKeeper's editor, in a new tab">
-            <PenLine /> <span className="btn-label">Edit in LegendKeeper</span>
-          </a>
-        ) : (
+        <a className="btn btn-sm btn-collapse" href={appUrl} target="_blank" rel="noopener noreferrer" aria-label="Edit in LegendKeeper" title={role === "GM" ? "Open the page in LegendKeeper's editor, in a new tab" : "Open the page in LegendKeeper's editor, in a new tab (needs edit access to the project)"}>
+          <PenLine /> <span className="btn-label">Edit in LegendKeeper</span>
+        </a>
+        {role !== "GM" && (
           <a className="btn btn-sm btn-collapse" href={fullPageUrl} target="_blank" rel="noopener noreferrer" aria-label="Open in LegendKeeper" title="Open in a new tab">
             <SquareArrowOutUpRight /> <span className="btn-label">Open in LegendKeeper</span>
           </a>

@@ -208,6 +208,22 @@ export interface PageServiceOptions {
   fetchImage: ImageFetcher;
 }
 
+/** Drops hidden nodes (`isHidden`) and secret blocks, at any depth. */
+export function publicOnly<T>(value: T, depth = 0): T {
+  if (depth > 64) return value;
+  if (Array.isArray(value)) {
+    return value
+      .filter((v) => !(v && typeof v === "object" && ((v as LkNode).kind === "secret" || (v as LkNode).isHidden === true)))
+      .map((v) => publicOnly(v, depth + 1)) as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = publicOnly(v, depth + 1);
+    return out as T;
+  }
+  return value;
+}
+
 function listKey(audience: PageListAudience, projectId: string): string {
   return `page-list/${audience}/${projectId}`;
 }
@@ -235,6 +251,7 @@ export class PageService {
   private readonly pages: TtlCache<string, CachedPage>;
   private readonly searches: TtlCache<string, SearchResponse>;
   private readonly pageLists: PageListStore;
+  private readonly publicIds = new Map<string, { version: string; ids: Set<string> }>();
   private readonly listRequestsPerChunk: number;
   private readonly images: TtlCache<string, FetchedImage>;
   private readonly pageFlight = new InFlight<string, CachedPage>();
@@ -283,6 +300,25 @@ export class PageService {
   /** A stored page list as JSON text, or null before its first build. */
   storedPageList(audience: PageListAudience, projectId: string): Promise<string | null> {
     return this.pageLists.get(listKey(audience, projectId));
+  }
+
+  /**
+   * Whether a page is in the project's stored public list: what LegendKeeper
+   * shows anonymous visitors, so hidden pages and pages under hidden folders
+   * are never in it.
+   */
+  async isPublicPage(projectId: string, resourceId: string): Promise<boolean> {
+    const version = await this.pageListVersion("public", projectId);
+    if (!version) return false;
+    let cached = this.publicIds.get(projectId);
+    if (cached?.version !== version) {
+      const raw = await this.storedPageList("public", projectId);
+      if (!raw) return false;
+      const list = JSON.parse(raw) as StoredPageList;
+      cached = { version, ids: new Set(list.resources.map((r) => r.id)) };
+      this.publicIds.set(projectId, cached);
+    }
+    return cached.ids.has(resourceId);
   }
 
   /** The stored list's `generatedAt`, which is cheap to check before downloading it. */
@@ -371,7 +407,7 @@ export class PageService {
     return { resources, nextCursor: next ?? null };
   }
 
-  private async load(caller: Caller, projectId: string, resourceId: string): Promise<CachedPage> {
+  private async load(caller: Caller, projectId: string, resourceId: string, audience: PageListAudience): Promise<CachedPage> {
     await this.projects.require(caller, projectId);
     const client = caller.client;
     const base = `/api/v3/projects/${encodeURIComponent(projectId)}/resources/${encodeURIComponent(resourceId)}`;
@@ -381,6 +417,11 @@ export class PageService {
       resource = await client.get<LkResource>(base);
     } catch (err) {
       throw mapUpstreamError(err, notFound);
+    }
+    if (audience === "public") {
+      // What a player may see: no hidden page, tab or sidebar field, and no secret block.
+      if (resource.isHidden) throw notFound;
+      resource = { ...resource, documents: (resource.documents ?? []).filter((d) => !d.isHidden), properties: publicOnly(resource.properties ?? []) };
     }
 
     const pageDocs = (resource.documents ?? [])
@@ -395,7 +436,8 @@ export class PageService {
       pageDocs.slice(0, MAX_PAGE_DOCUMENTS).map(async (doc) => {
         try {
           const content = await client.get<LkDocumentBlocks>(`${base}/docs/${encodeURIComponent(doc.id)}/blocks`);
-          return { doc, blocks: content.blocks as LkNode[] };
+          const blocks = content.blocks as LkNode[];
+          return { doc, blocks: audience === "public" ? publicOnly(blocks) : blocks };
         } catch (err) {
           const mapped = mapUpstreamError(err, notFound);
           // Auth failures affect the whole page; surface them instead of a partial result.
@@ -466,24 +508,25 @@ export class PageService {
     return { details, content, images: new Map(extracted.images.map((img) => [img.id, img])) };
   }
 
-  async getPage(caller: Caller, projectId: string, resourceId: string, fresh = false): Promise<CachedPage> {
-    const key = `${caller.keyId}/${projectId}/${resourceId}`;
+  /** A page as the GM sees it, or ("public") as a player may: hidden parts left out. */
+  async getPage(caller: Caller, projectId: string, resourceId: string, fresh = false, audience: PageListAudience = "gm"): Promise<CachedPage> {
+    const key = `${caller.keyId}/${audience}/${projectId}/${resourceId}`;
     if (!fresh) {
       const cached = this.pages.get(key);
       if (cached) return cached;
     }
-    const page = await this.pageFlight.run(key, () => this.load(caller, projectId, resourceId));
+    const page = await this.pageFlight.run(key, () => this.load(caller, projectId, resourceId, audience));
     this.pages.set(key, page);
     return page;
   }
 
   /** Image bytes for an image that belongs to the given page. */
-  async getImage(caller: Caller, projectId: string, resourceId: string, imageId: string): Promise<FetchedImage> {
-    let page = await this.getPage(caller, projectId, resourceId);
+  async getImage(caller: Caller, projectId: string, resourceId: string, imageId: string, audience: PageListAudience = "gm"): Promise<FetchedImage> {
+    let page = await this.getPage(caller, projectId, resourceId, false, audience);
     let image = page.images.get(imageId);
     if (!image) {
       // The page may have changed since it was cached.
-      page = await this.getPage(caller, projectId, resourceId, true);
+      page = await this.getPage(caller, projectId, resourceId, true, audience);
       image = page.images.get(imageId);
     }
     if (!image) throw new HttpError(404, "IMAGE_NOT_FOUND", "That image is no longer on this page.");

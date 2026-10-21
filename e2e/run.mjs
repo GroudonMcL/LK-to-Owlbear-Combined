@@ -522,6 +522,7 @@ async function main() {
   await player.waitForFunction((ns) => window.host.state.popovers[`${ns}/panel`]?.el.src.includes("resource=goblin"), NS, { timeout: 10_000 });
   const playerPanel = player.frameLocator('iframe[data-popover$="/panel"]');
   check("players open public pages from the label, and get the public view in a tab", (await playerPanel.getByRole("link", { name: /Open in LegendKeeper/ }).getAttribute("href")) === "https://www.legendkeeper.com/p/proj_test01/goblin/");
+  check("players also get Edit in LegendKeeper, for those who may edit", (await playerPanel.getByRole("link", { name: /Edit in LegendKeeper/ }).getAttribute("href")) === "https://www.legendkeeper.com/a/proj_test01/goblin/");
   await player.evaluate((ns) => window.host.clickContextMenu(`${ns}/link`, ["other"]), NS);
   const playerPicker = player.frameLocator('iframe[data-modal$="/picker"]');
   await playerPicker.getByLabel("Search LegendKeeper pages").fill("mordrith");
@@ -544,6 +545,50 @@ async function main() {
     (await playerTextPanel.locator("iframe.lk-frame").getAttribute("src")) === "https://www.legendkeeper.com/p/proj_test01/dragon/" &&
       (await playerTextPanel.getByRole("button", { name: "Full page (GM)" }).count()) === 0,
   );
+  console.log("Players making tokens");
+  // Each page is its own Owlbear client; the test carries broadcasts between them.
+  const relay = async (from, to, suffix) => {
+    const message = (await from.evaluate(() => window.host.state.broadcasts)).filter((b) => b.channel.endsWith(suffix)).at(-1);
+    await to.evaluate(({ channel, data }) => window.host.deliver(channel, data), message);
+    return message;
+  };
+  await playerPop.getByRole("button", { name: "Ask the GM" }).click();
+  await playerPop.getByText("Waiting for the GM").waitFor();
+  const request = await relay(player, page, "/access-request");
+  check("a player's request names them", request.data.playerId === "player-user");
+  const accessDialog = page.frameLocator('iframe[data-modal$="/access-request"]');
+  await accessDialog.getByText("asks to search LegendKeeper and make tokens").waitFor();
+  check("the GM is asked first", true);
+  await accessDialog.getByRole("button", { name: "Allow" }).click();
+  await page.waitForFunction(() => window.host.state.broadcasts.some((b) => b.channel.endsWith("/access-answer")), null, { timeout: 10_000 });
+  const answer = await relay(page, player, "/access-answer");
+  check("the GM's browser sends a pass, never the password or the API key", /^pp1\./.test(answer.data.pass) && !JSON.stringify(answer).includes(PASSWORD) && !JSON.stringify(answer).includes(API_KEY));
+  await playerPop.getByLabel("Search public pages").waitFor();
+  check("the player can now search", true);
+  await playerPop.getByLabel("Search public pages").fill("mordrith");
+  await playerPop.getByText("No public page matches").waitFor();
+  check("players' search finds no hidden pages", true);
+  await playerPop.getByLabel("Search public pages").fill("dragon");
+  await playerPop.locator(".result", { hasText: "Ancient Red Dragon" }).click();
+  await playerPop.getByText("No images on this page").waitFor();
+  check("a secret image is never offered to players", true);
+  await playerPop.getByRole("button", { name: "Back to search" }).click();
+  await playerPop.getByLabel("Search public pages").fill("goblin");
+  await playerPop.locator(".result", { hasText: "Goblin Boss" }).click();
+  await playerPop.getByText("Choose artwork").waitFor();
+  await playerPop.locator(".image-card img").first().waitFor();
+  check("players see a public page's art", (await playerPop.locator(".image-card").count()) === 5);
+  await playerPop.getByRole("button", { name: "Edit token" }).click();
+  const playerEditor = player.frameLocator('iframe[data-modal$="/editor"]');
+  await playerEditor.locator(".token-layer").waitFor();
+  await playerEditor.getByText("Loading artwork").waitFor({ state: "detached" });
+  check("players can't hide their tokens or host them on the server", (await playerEditor.getByText("Hidden from players").count()) === 0 && (await playerEditor.getByRole("button", { name: "Extension server" }).count()) === 0);
+  await playerEditor.getByRole("button", { name: "Create token" }).click();
+  await player.waitForFunction(() => window.host.state.uploads.length > 0, null, { timeout: 10_000 });
+  const playerUpload = (await player.evaluate(() => window.host.state.uploads)).at(-1);
+  check("a player's token goes to their Owlbear storage, visible", playerUpload.visible === true && playerUpload.name === "Goblin Boss", JSON.stringify({ ...playerUpload, url: undefined }));
+  await playerPop.getByRole("button", { name: "Back to search" }).click();
+
   const playerState = await player.evaluate(() => window.host.state);
   check("player: every SDK call handled and none failed", playerState.unhandled.length === 0 && playerState.errors.length === 0, JSON.stringify([playerState.unhandled, playerState.errors]));
 

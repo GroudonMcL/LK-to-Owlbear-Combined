@@ -49,10 +49,11 @@ describe("extractPage", () => {
     expect(result.images.map((i) => i.label)).toEqual(["Red dragon art"]);
   });
 
-  it("does not read a size out of prose and handles pages without images", async () => {
+  it("does not read a size out of prose", async () => {
     const result = await page("village", [["v1", "Main"]]);
     expect(result.size).toBeNull();
-    expect(result.images).toEqual([]);
+    // Only the sidebar image (hidden from players; the GM sees it).
+    expect(result.images.map((i) => i.label)).toEqual(["Secret map"]);
   });
 
   it("adds board images in reading order after the page tabs, once each", async () => {

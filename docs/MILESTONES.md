@@ -295,3 +295,34 @@ the API key never reaching browser storage.
 - KV is eventually consistent: a rebuilt list can take up to a minute to reach other
   Cloudflare locations. Browsers told about a rebuild check again after 65 seconds.
 - A stored list holds up to 60 build steps (about 90,000 pages).
+
+## Milestone 9: Players make tokens; frames in Stamped's manner
+
+**Implemented**
+- **Edit in LegendKeeper for players.** The page panel offers it to everyone, next to
+  **Open in LegendKeeper** for players. LegendKeeper lets in members who may edit.
+- **Players making tokens.** A player asks; the GM allows it in a dialog. The GM's browser
+  gets a player pass from `POST /api/player-pass` (HMAC-signed, one project, 12 hours)
+  and broadcasts it to the asking player. With the pass, `GET /api/player/projects/:p/pages/:r`
+  (and `/images/:i`) serve pages in the stored public list, with hidden documents, hidden
+  properties and secret blocks removed (`publicOnly`). Players search the public page
+  list in the browser. Their tokens are always visible and are saved to their own
+  Owlbear storage.
+- **Frames.** The artwork frames (Stamped Colour, Stamped Grey) are gone. Every other
+  frame is now drawn on Stamped's build (`finishes.ts`: lit band, inner step, drop and
+  inner shadows) with its own surface and ornaments. There are new textures, one frame
+  per D&D class, and a few strange ones. Presets are grouped, and all share Stamped's
+  thickness (14%) and a 10% outer spacing so the drop shadow isn't clipped. **Keep the
+  frame filled** starts off. Saved editor looks moved to a new key so the new defaults
+  apply.
+
+**Tests run.** Player passes (expiry, tampering, password change). Player routes: hidden
+parts left out, non-public pages refused, GM routes refused to a pass, on Node and on the
+Worker. Frame defaults, and the drop shadow staying inside the canvas for every preset.
+e2e: the request, the GM's approval, a pass that carries no secret, players' search,
+secret art withheld, and a player's token saved visible to Owlbear storage.
+
+**Known limitations**
+- Owlbear can't send a broadcast to one player, so the pass goes to every browser in the
+  room and only the asking player keeps it.
+- Passes can't be withdrawn one by one: they expire, or all go when the password changes.

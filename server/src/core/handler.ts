@@ -1,11 +1,12 @@
 // The HTTP API as a Web-standard (Request) => Response function, so the same
 // code runs in Cloudflare Workers and, through a thin adapter, in Node.
 
-import type { HealthResponse, PageListAudience, PageListBuildStep, TokenUploadResponse } from "@lkob/shared";
+import type { HealthResponse, PageListAudience, PageListBuildStep, PlayerPassResponse, TokenUploadResponse } from "@lkob/shared";
 import type { Config } from "./config.js";
 import { badRequest, HttpError } from "./errors.js";
 import { readDimensions, sniffImageMime } from "./imageSniff.js";
 import { LkClient } from "./lk/client.js";
+import { isPlayerPass, PlayerPasses } from "./playerPass.js";
 import { ServerKeys, type PageService, type ProjectResolver } from "./services.js";
 import { sha256Hex, StoreFullError, type TokenStore } from "./tokenStore.js";
 
@@ -108,6 +109,7 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
     projects,
   );
   const tokenDigests = Promise.all(config.accessTokens.map((t) => sha256Hex(t)));
+  const passes = new PlayerPasses(config.accessTokens);
   const limiter = new RateLimiter(config.rateLimitPerMinute);
 
   function corsHeaders(request: Request): Record<string, string> {
@@ -136,6 +138,30 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
     const index = (await tokenDigests).findIndex((d) => digestsEqual(d, candidate));
     if (index < 0) throw new HttpError(401, "UNAUTHORIZED", "The server didn't accept that access password.");
     return `t${index}`;
+  }
+
+  /** The project a player's pass opens. */
+  async function authenticatePass(request: Request): Promise<string> {
+    const token = /^Bearer\s+(.+)$/i.exec(request.headers.get("authorization") ?? "")?.[1].trim() ?? "";
+    const projectId = isPlayerPass(token) ? await passes.verify(token) : null;
+    if (!projectId) {
+      throw new HttpError(401, "UNAUTHORIZED", "Your permission to search pages and make tokens has run out. Ask the GM again.");
+    }
+    return projectId;
+  }
+
+  async function serveImage(image: { body: Uint8Array; mime: string }, cors: Record<string, string>): Promise<Response> {
+    return new Response(image.body, {
+      status: 200,
+      headers: {
+        ...cors,
+        "Content-Type": image.mime,
+        "Content-Length": String(image.body.byteLength),
+        "Cache-Control": "private, max-age=600",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'",
+      },
+    });
   }
 
   function rateLimit(key: string): void {
@@ -222,7 +248,37 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
       return storedPageList("public", parts[3], url, cors);
     }
 
+    // GET /api/player/projects/:projectId/pages/:resourceId[/images/:imageId]: a public
+    // page, hidden tabs, fields and secrets left out, for a player the GM let in.
+    if (parts[1] === "player" && parts[2] === "projects" && parts[4] === "pages" && (parts.length === 6 || parts.length === 8) && method === "GET") {
+      const [projectId, resourceId] = [parts[3], parts[5]];
+      if (!ID_PATTERN.test(projectId) || !ID_PATTERN.test(resourceId)) throw badRequest("Invalid id.");
+      rateLimit(`ip:${request.headers.get("cf-connecting-ip") ?? "local"}`);
+      if ((await authenticatePass(request)) !== projectId) {
+        throw new HttpError(401, "UNAUTHORIZED", "Your permission is for a different LegendKeeper project. Ask the GM again.");
+      }
+      if (!(await pages.isPublicPage(projectId, resourceId))) {
+        throw new HttpError(404, "PAGE_NOT_FOUND", "This page isn't public, so players can't make tokens from it.");
+      }
+      const caller = await keys.callerFor(projectId);
+      if (parts.length === 6) return json(200, (await pages.getPage(caller, projectId, resourceId, url.searchParams.get("fresh") === "1", "public")).details, cors);
+      if (parts[6] === "images") {
+        if (!IMAGE_ID_PATTERN.test(parts[7])) throw badRequest("Invalid image id.");
+        return serveImage(await pages.getImage(caller, projectId, resourceId, parts[7], "public"), cors);
+      }
+    }
+
     rateLimit(`pw:${await authenticate(request)}`);
+
+    // POST /api/player-pass {projectId}: a pass the GM's browser hands to a player.
+    if (parts[1] === "player-pass" && parts.length === 2 && method === "POST") {
+      const body = await readJson(request);
+      const projectId = typeof body.projectId === "string" ? body.projectId : "";
+      if (!ID_PATTERN.test(projectId)) throw badRequest("Invalid project id.");
+      await keys.callerFor(projectId);
+      const issued: PlayerPassResponse = await passes.issue(projectId);
+      return json(200, issued, cors);
+    }
 
     // GET /api/projects[?refresh=1]: the projects the server's keys open.
     if (parts[1] === "projects" && parts.length === 2 && method === "GET") {
@@ -281,18 +337,7 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
         if (parts[5] === "images" && parts.length === 7 && method === "GET") {
           const imageId = parts[6];
           if (!IMAGE_ID_PATTERN.test(imageId)) throw badRequest("Invalid image id.");
-          const image = await pages.getImage(caller, projectId, resourceId, imageId);
-          return new Response(image.body, {
-            status: 200,
-            headers: {
-              ...cors,
-              "Content-Type": image.mime,
-              "Content-Length": String(image.body.byteLength),
-              "Cache-Control": "private, max-age=600",
-              "X-Content-Type-Options": "nosniff",
-              "Content-Security-Policy": "default-src 'none'",
-            },
-          });
+          return serveImage(await pages.getImage(caller, projectId, resourceId, imageId), cors);
         }
       }
     }

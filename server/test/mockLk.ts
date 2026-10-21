@@ -179,7 +179,10 @@ export function buildFixtures(assetBase: string) {
       rank: "a1",
       isHidden: false,
       permissions: {},
-      documents: [{ id: "d1", name: "Statblock", type: "page", rank: "a0", isHidden: false }],
+      documents: [
+        { id: "d1", name: "Statblock", type: "page", rank: "a0", isHidden: false },
+        { id: "d2", name: "DM notes", type: "page", rank: "a1", isHidden: true },
+      ],
       properties: [],
     },
     village: {
@@ -191,7 +194,8 @@ export function buildFixtures(assetBase: string) {
       isHidden: false,
       permissions: {},
       documents: [{ id: "v1", name: "Main", type: "page", rank: "a0", isHidden: false }],
-      properties: [],
+      // A sidebar field only the GM sees.
+      properties: [{ id: "vp", kind: "image", url: `${assetBase}/assets/goblin-banner.png`, title: "Secret map", isHidden: true }],
     },
     ogre: {
       id: "ogre",
@@ -276,6 +280,7 @@ export function buildFixtures(assetBase: string) {
         children: [{ id: "s3", kind: "image", url: `${assetBase}/assets/dragon.jpg`, title: "Red dragon art" }],
       },
     ],
+    "dragon/d2": [{ id: "n1", kind: "image", url: `${assetBase}/assets/goblin-action.png`, title: "Lair plan" }],
     "village/v1": [{ id: "v", kind: "paragraph", content: runs("A large village by the river.") }],
     "missingimg/m1": [],
     "ogre/o1": [{ id: "o", kind: "image", url: `${assetBase}/assets/ogre-main.png`, title: "Ogre" }],

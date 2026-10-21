@@ -12,6 +12,7 @@ import { syncRoomIndex } from "./lib/existing";
 import { LINK_KEY, parseLink } from "./lib/links";
 import { describeOpenError, linkToken, openForToken } from "./lib/open";
 import { loadPageList, PAGE_LIST_STATUS_KEY, readStatus, recheckPageList } from "./lib/pageLists";
+import { parseAccessRequest, receiveAccessAnswer, showAccessRequest } from "./lib/playerAccess";
 import { publishProject } from "./lib/project";
 import { SCENE_LINK_SETTINGS_KEY } from "./lib/sceneLinkSettings";
 import { parseSharedPage, receiveSharedPage, showShareRequest } from "./lib/share";
@@ -19,6 +20,8 @@ import { loadSettings, requestNavigation, SETTINGS_STORAGE_KEY } from "./lib/set
 import { PageMatcher, type ItemTextMatches } from "./lib/textMatch";
 import { isToken, TOKEN_FILTER } from "./lib/token";
 import {
+  CH_ACCESS_ANSWER,
+  CH_ACCESS_REQUEST,
   CH_PAGE_LIST_REBUILT,
   CH_PAGES_REFRESHED,
   CH_PLACE,
@@ -341,6 +344,13 @@ OBR.onReady(async () => {
     if (!page) return;
     receiveSharedPage(obrPlatform, page).catch((err: unknown) => void OBR.notification.show(describeOpenError(err), "ERROR"));
   });
+  // A player asks to search pages and make tokens; the GM answers.
+  OBR.broadcast.onMessage(CH_ACCESS_REQUEST, async (event) => {
+    const request = parseAccessRequest(event.data);
+    if (!request || (await OBR.player.getRole()) !== "GM") return;
+    await showAccessRequest(obrPlatform, request).catch((err: unknown) => console.warn("[LegendKeeper] access request", err));
+  });
+  OBR.broadcast.onMessage(CH_ACCESS_ANSWER, (event) => void receiveAccessAnswer(obrPlatform, event.data).catch(() => undefined));
   OBR.broadcast.onMessage(CH_SHARE_REQUEST, async (event) => {
     const page = parseSharedPage(event.data);
     if (!page || (await OBR.player.getRole()) !== "GM") return;

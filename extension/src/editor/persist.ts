@@ -1,9 +1,10 @@
 // Remembers the last frame setup so a session of imports doesn't need
 // reconfiguring for every token.
 
-import { DEFAULT_STYLE, FRAME_PRESETS, SHAPES, type TokenStyle } from "./model";
+import { DEFAULT_STYLE, FRAME_PRESETS, FRAME_STYLES, SHAPES, type TokenStyle } from "./model";
 
-const KEY = "lkob.editor.style.v1";
+// v2: new frames and defaults (more outer spacing for the drop shadow).
+const KEY = "lkob.editor.style.v2";
 
 export interface SavedLook {
   style: TokenStyle;
@@ -16,6 +17,7 @@ export function loadLook(): SavedLook {
     if (!raw?.style) return { style: DEFAULT_STYLE, presetId: FRAME_PRESETS[0].id };
     const style = { ...DEFAULT_STYLE, ...raw.style };
     if (!SHAPES.some((s) => s.id === style.shape)) style.shape = DEFAULT_STYLE.shape;
+    if (!FRAME_STYLES.has(style.frame)) return { style: DEFAULT_STYLE, presetId: FRAME_PRESETS[0].id };
     return { style, presetId: raw.presetId ?? null };
   } catch {
     return { style: DEFAULT_STYLE, presetId: FRAME_PRESETS[0].id };

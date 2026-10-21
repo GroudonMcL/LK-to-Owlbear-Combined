@@ -187,6 +187,9 @@ export const mockPlatform: Platform = {
   async playerName() {
     return "Mock GM";
   },
+  async playerId() {
+    return "mock-player";
+  },
   onLocal(channel, cb) {
     return onKey(BUS, () => {
       const msg = read<{ channel: string; data: unknown } | null>(BUS, null);

@@ -93,6 +93,8 @@ export interface Platform {
   sendToRoom(channel: string, data: unknown): Promise<void>;
   /** This person's name in the room. */
   playerName(): Promise<string>;
+  /** This person's id in the room. */
+  playerId(): Promise<string>;
   onLocal(channel: string, cb: (data: unknown) => void): () => void;
   getTheme(): Promise<ThemeInfo>;
   onThemeChange(cb: (theme: ThemeInfo) => void): () => void;

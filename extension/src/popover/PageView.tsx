@@ -17,6 +17,8 @@ import { ApiError, describeError, type ApiClient } from "../lib/api";
 import { lookupExisting, type ExistingState, type SimilarMatch } from "../lib/existing";
 import { LINK_KEY, type TokenMatch } from "../lib/links";
 import { describeOpenError, openPageById, saveLink } from "../lib/open";
+import type { Role } from "../lib/pageLists";
+import { dropAccess } from "../lib/playerAccess";
 import { CH_TOKEN_CREATED } from "../platform/channels";
 import type { Platform } from "../platform/types";
 import { Banner, Button, Empty, IconButton, Spinner } from "../ui/components";
@@ -91,7 +93,7 @@ function ImageCard({
   );
 }
 
-function TokenRow({ match, platform, pageTitle }: { match: TokenMatch; platform: Platform; pageTitle: string }) {
+function TokenRow({ match, platform, pageTitle, canEdit }: { match: TokenMatch; platform: Platform; pageTitle: string; canEdit: boolean }) {
   const [busy, setBusy] = useState(false);
   const { item } = match;
   const rename = async () => {
@@ -126,7 +128,7 @@ function TokenRow({ match, platform, pageTitle }: { match: TokenMatch; platform:
           {match.nameDiffers && <span className="badge warn">Name differs</span>}
         </span>
       </div>
-      {match.nameDiffers && (
+      {match.nameDiffers && canEdit && (
         <Button size="sm" variant="ghost" loading={busy} onClick={rename} title={`Rename to “${pageTitle}”`}>
           Rename
         </Button>
@@ -181,13 +183,17 @@ export function PageView({
   projectId,
   page: ref,
   onBack,
+  role = "GM",
 }: {
   api: ApiClient;
   platform: Platform;
   projectId: string;
   page: PageRef;
   onBack: () => void;
+  /** Players make tokens from public pages, and change only their own links. */
+  role?: Role;
 }) {
+  const gm = role === "GM";
   const [page, setPage] = useState<PageDetails | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
@@ -220,6 +226,11 @@ export function PageView({
     void load(false);
   }, [load]);
 
+  // A player's pass ran out (or the GM changed the password): ask again.
+  useEffect(() => {
+    if (!gm && error instanceof ApiError && error.code === "UNAUTHORIZED") dropAccess(platform.roomId());
+  }, [gm, error, platform]);
+
   const title = page?.name ?? ref.name;
   const aliasKey = (page?.aliases ?? []).join("\n");
 
@@ -243,6 +254,7 @@ export function PageView({
     setOpening(true);
     try {
       const q = new URLSearchParams({ p: projectId, r: page.id, i: imageId });
+      if (!gm) q.set("player", "1");
       if (override) q.set("dup", "1");
       await platform.openEditor(q);
     } finally {
@@ -261,7 +273,7 @@ export function PageView({
 
   /** Adopts an unlinked token for this page: the same link an import would give it. */
   const useSimilar = async (match: SimilarMatch) => {
-    await saveLink(platform, "GM", projectId, match.item.id, { resourceId: ref.id, name: title });
+    await saveLink(platform, role, projectId, match.item.id, { resourceId: ref.id, name: title });
     await platform.selectAndFocus([match.item.id]).catch(() => undefined);
     await platform.notify(`Linked ${match.matched} to ${title}.`, "SUCCESS");
     await check();
@@ -379,7 +391,7 @@ export function PageView({
           >
             <div className="token-list">
               {here.map((m) => (
-                <TokenRow key={m.item.id} match={m} platform={platform} pageTitle={title} />
+                <TokenRow key={m.item.id} match={m} platform={platform} pageTitle={title} canEdit={gm} />
               ))}
             </div>
             {here.some((m) => m.pageRenamed) && (
@@ -452,7 +464,7 @@ export function PageView({
                     Retry
                   </Button>
                 )}
-                {pageGone && here.length > 0 && (
+                {pageGone && gm && here.length > 0 && (
                   <Button size="sm" icon={<Unlink />} loading={unlinking} onClick={unlinkAll}>
                     Unlink {here.length} token{here.length > 1 ? "s" : ""}
                   </Button>

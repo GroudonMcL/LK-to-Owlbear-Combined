@@ -6,6 +6,7 @@ import type {
   PageDetails,
   PageListBuildResult,
   PageListBuildStep,
+  PlayerPassResponse,
   ProjectsResponse,
   SearchResponse,
   StoredPageList,
@@ -40,8 +41,20 @@ const LIST_TIMEOUT_MS = 60_000;
 export class ApiClient {
   private readonly base: string;
 
-  constructor(private readonly settings: Pick<Settings, "backendUrl" | "accessToken">) {
+  /**
+   * A "gm" client sends the access password and reaches the whole API; a
+   * "player" client sends a player pass and reads public pages only.
+   */
+  constructor(
+    private readonly settings: Pick<Settings, "backendUrl" | "accessToken">,
+    readonly audience: "gm" | "player" = "gm",
+  ) {
     this.base = settings.backendUrl.replace(/\/+$/, "");
+  }
+
+  private pagePath(projectId: string, resourceId: string): string {
+    const root = this.audience === "player" ? "/api/player/projects" : "/api/projects";
+    return `${root}/${encodeURIComponent(projectId)}/pages/${encodeURIComponent(resourceId)}`;
   }
 
   private async request(path: string, init: RequestInit = {}, signal?: AbortSignal, auth = true, timeoutMs = TIMEOUT_MS): Promise<Response> {
@@ -114,11 +127,7 @@ export class ApiClient {
   }
 
   page(projectId: string, resourceId: string, fresh = false, signal?: AbortSignal): Promise<PageDetails> {
-    return this.json(
-      `/api/projects/${encodeURIComponent(projectId)}/pages/${encodeURIComponent(resourceId)}${fresh ? "?fresh=1" : ""}`,
-      undefined,
-      signal,
-    );
+    return this.json(`${this.pagePath(projectId, resourceId)}${fresh ? "?fresh=1" : ""}`, undefined, signal);
   }
 
   /** A page's content to read, from LegendKeeper's API (hidden pages and secrets included). */
@@ -157,12 +166,13 @@ export class ApiClient {
   }
 
   async imageBlob(projectId: string, resourceId: string, imageId: string, signal?: AbortSignal): Promise<Blob> {
-    const res = await this.request(
-      `/api/projects/${encodeURIComponent(projectId)}/pages/${encodeURIComponent(resourceId)}/images/${encodeURIComponent(imageId)}`,
-      {},
-      signal,
-    );
+    const res = await this.request(`${this.pagePath(projectId, resourceId)}/images/${encodeURIComponent(imageId)}`, {}, signal);
     return res.blob();
+  }
+
+  /** The GM: a pass for a player, which opens this project's public pages only. */
+  playerPass(projectId: string): Promise<PlayerPassResponse> {
+    return this.json("/api/player-pass", { method: "POST", body: JSON.stringify({ projectId }), headers: { "Content-Type": "application/json" } });
   }
 
   uploadToken(png: Blob): Promise<TokenUploadResponse> {

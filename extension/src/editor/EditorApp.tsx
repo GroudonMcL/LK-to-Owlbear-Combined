@@ -1,10 +1,11 @@
 import { footprintCells, type PageDetails } from "@lkob/shared";
 import { ImageOff, Wand2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiClient, describeError } from "../lib/api";
+import { ApiClient, ApiError, describeError } from "../lib/api";
 import { createToken } from "../lib/createToken";
 import { lookupExisting } from "../lib/existing";
 import { newImportId } from "../lib/links";
+import { dropAccess, playerApi, readAccess } from "../lib/playerAccess";
 import { saveSettings, useSettings } from "../lib/settings";
 import type { Platform } from "../platform/types";
 import { Banner, BrandMark, Button, IconButton, Spinner, useTheme } from "../ui/components";
@@ -18,6 +19,8 @@ import { renderToken } from "./render";
 import { Stage } from "./Stage";
 
 const params = new URLSearchParams(location.search);
+/** A player making a token: public pages only, saved to their own Owlbear storage, never hidden. */
+const player = params.get("player") === "1";
 
 type DupPrompt = null | { kind: "exists"; count: number } | { kind: "unknown"; message: string };
 
@@ -42,8 +45,9 @@ export function EditorApp({ platform }: { platform: Platform }) {
   const projectId = params.get("p") ?? "";
   const resourceId = params.get("r") ?? "";
   const api = useMemo(
-    () => (settings.backendUrl && settings.accessToken ? new ApiClient(settings) : null),
-    [settings.backendUrl, settings.accessToken],
+    () =>
+      player ? playerApi(readAccess(platform.roomId())) : settings.backendUrl && settings.accessToken ? new ApiClient(settings) : null,
+    [platform, settings.backendUrl, settings.accessToken],
   );
 
   const [page, setPage] = useState<PageDetails | null>(null);
@@ -95,12 +99,15 @@ export function EditorApp({ platform }: { platform: Platform }) {
         setPage(details);
         setToken((t) => ({ ...t, name: t.name || details.name, size: details.size?.category ?? "medium" }));
       })
-      .catch((err) => setPageError(describeError(err)));
+      .catch((err) => {
+        setPageError(describeError(err));
+        if (player && err instanceof ApiError && err.code === "UNAUTHORIZED") dropAccess(platform.roomId());
+      });
     api
       .health()
       .then((h) => setHostingAvailable(h.tokenHosting))
       .catch(() => undefined);
-  }, [api, projectId, resourceId]);
+  }, [api, platform, projectId, resourceId]);
 
   // Decode the selected image into a bounded working copy.
   useEffect(() => {
@@ -197,8 +204,8 @@ export function EditorApp({ platform }: { platform: Platform }) {
         pixelSize: output.exportSize,
         cells,
         layer: token.layer,
-        visible: token.visible,
-        hosting: output.hosting,
+        visible: player ? true : token.visible,
+        hosting: player ? "owlbear" : output.hosting,
         placement: output.placement,
         importId,
       });
@@ -244,7 +251,11 @@ export function EditorApp({ platform }: { platform: Platform }) {
 
   let overlay = null;
   if (!api) {
-    overlay = <Banner tone="warn" title="Not connected">Connect LegendKeeper in the extension's Settings first.</Banner>;
+    overlay = player ? (
+      <Banner tone="warn" title="Not allowed yet">Ask the GM again from the LegendKeeper popover: their permission has run out.</Banner>
+    ) : (
+      <Banner tone="warn" title="Not connected">Connect LegendKeeper in the extension's Settings first.</Banner>
+    );
   } else if (image.status === "error") {
     overlay = (
       <Banner
@@ -318,6 +329,7 @@ export function EditorApp({ platform }: { platform: Platform }) {
               output={output}
               onOutput={onOutput}
               hostingAvailable={hostingAvailable}
+              player={player}
             />
           )}
         </aside>

@@ -1,11 +1,13 @@
-// What players see in the toolbar popover. Importing is for the GM; players
-// open token pages from the context menu, see the public pages named in the
-// scene's notes and text, and choose where pages open.
+// What players see in the toolbar popover. Players open token pages from the
+// context menu, see the public pages named in the scene's notes and text,
+// choose where pages open, and, once the GM allows it, make tokens from
+// public pages.
 
 import type { PageList } from "@lkob/shared";
 import { BookOpen, Link2, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { loadPageList, PageListError } from "../lib/pageLists";
+import { playerApi, usePlayerAccess } from "../lib/playerAccess";
 import { CH_PAGES_REFRESHED } from "../platform/channels";
 import type { Platform } from "../platform/types";
 import { getRoomProject } from "../lib/project";
@@ -13,6 +15,9 @@ import { Banner, Button, Spinner } from "../ui/components";
 import { PageListStatusLine } from "../ui/PageListStatusLine";
 import type { TextMatchState } from "../ui/useTextMatches";
 import { OpenModeField } from "./OpenModeField";
+import { PageView } from "./PageView";
+import { PlayerTokens } from "./PlayerTokens";
+import type { PageRef } from "./SearchView";
 import { SceneLinksField } from "./SceneLinksField";
 import { SceneTextView } from "./SceneTextView";
 
@@ -21,6 +26,11 @@ export function PlayerView({ platform, textMatches }: { platform: Platform; text
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [projectId, setProjectId] = useState("");
+  const access = usePlayerAccess(platform);
+  const [page, setPage] = useState<PageRef | null>(null);
+  const pass = access.status === "granted" ? access.pass : "";
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- a new client only for a new pass
+  const api = useMemo(() => playerApi(access), [pass]);
 
   useEffect(() => {
     void getRoomProject(platform)
@@ -47,6 +57,10 @@ export function PlayerView({ platform, textMatches }: { platform: Platform; text
     await platform.sendLocal(CH_PAGES_REFRESHED, {}).catch(() => undefined);
     setRefreshing(false);
   };
+
+  if (page && api && access.status === "granted") {
+    return <PageView key={page.id} api={api} platform={platform} projectId={access.projectId} page={page} role="PLAYER" onBack={() => setPage(null)} />;
+  }
 
   return (
     <div className="scroll stack" style={{ height: "100%" }}>
@@ -75,6 +89,7 @@ export function PlayerView({ platform, textMatches }: { platform: Platform; text
           Refresh page list
         </Button>
       </section>
+      <PlayerTokens platform={platform} access={access} list={list} onOpen={setPage} />
       <section className="card stack">
         <div className="eyebrow">Named in this scene</div>
         <SceneTextView platform={platform} state={textMatches} />
