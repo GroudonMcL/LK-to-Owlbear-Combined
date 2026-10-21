@@ -162,15 +162,29 @@ GM allows it:
   data and failed lookups are all handled explicitly.
 - **Token editor.** A large live preview with drag, wheel or pinch zoom around the
   cursor, rotation, flip, fit/fill/reset, and a dimmed view of the art outside the frame.
-  There are five shapes and about forty frames, in four groups, all built the way
-  **Stamped** (the default) is: a band lit from the top left, a pressed-in inner step, a
-  drop shadow and a shadow cast onto the art.
-  - **Classic**: Stamped, Gilded, Silver, Engraved, Iron-bound, Forged steel, Ember gold,
-    Arcane, Infernal, Double line and Polished.
-  - **Textures**: Oak, Cobblestone, Rope, Dragon scale, Vines, Frost, Magma, Harlequin,
-    Knotwork, Starfield and Ossuary.
-  - **Classes**: one per D&D class, Barbarian to Wizard, plus Artificer.
-  - **Strange**: Mimic, Beholder, Gelatinous and Candy cane.
+  There are five shapes and 27 frames, in three groups, all built the way **Stamped**
+  (the default) is: a band lit from the top left, a pressed-in inner step, a drop shadow
+  and a shadow cast onto the art.
+  - **Classic**: Stamped, Gilded, Engraved, Arcane, Infernal, Double line, Polished and
+    No frame.
+  - **Textures**: Oak, Cobblestone, Magma, Harlequin, Knotwork and Starfield.
+  - **Classes**: one per D&D class plus Artificer:
+
+    | Class | Frame |
+    | --- | --- |
+    | Barbarian | battle-worn hide with claw gashes |
+    | Bard | music notes |
+    | Cleric | sunburst |
+    | Druid | vines |
+    | Fighter | battle-worn riveted steel |
+    | Monk | prayer beads with jade beads |
+    | Paladin | silver with gold crosses |
+    | Ranger | fletching |
+    | Rogue | stitched leather |
+    | Sorcerer | dragon scales |
+    | Warlock | watching eyes |
+    | Wizard | runes |
+    | Artificer | brass with a toothed inner edge, like a ring gear, and gears |
 
   Every frame takes any colour, thickness, spacing, backing and opacity. Outer spacing
   starts at 10%, which leaves room for the drop shadow. **Keep the frame filled** starts
@@ -371,7 +385,7 @@ extension. Code layout:
 
 ```sh
 npm install
-npm test                 # 383 unit/integration tests
+npm test                 # 370 unit/integration tests
 npm run typecheck
 npm run build:cloudflare && npm run e2e   # end-to-end in the Workers runtime (needs Chromium)
 ```

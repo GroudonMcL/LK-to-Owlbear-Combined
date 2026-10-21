@@ -203,7 +203,7 @@ async function main() {
   const modal = page.frameLocator('iframe[data-modal$="/editor"]');
   await modal.locator(".token-layer").waitFor();
   await modal.getByText("Loading artwork").waitFor({ state: "detached" });
-  check("Forged steel and Ember gold frames offered", (await modal.getByRole("button", { name: "Forged steel" }).count()) === 1 && (await modal.getByRole("button", { name: "Ember gold" }).count()) === 1);
+  check("class frames offered", (await modal.getByRole("button", { name: "Barbarian" }).count()) === 1 && (await modal.getByRole("button", { name: "Artificer" }).count()) === 1);
   await modal.getByRole("button", { name: "Arcane" }).click();
   await modal.getByRole("button", { name: "Large", exact: true }).click();
   await page.waitForTimeout(400);

@@ -81,6 +81,56 @@ function groove(ctx: Ctx, g: FrameGeometry, at: number, base: string, width = 0.
   strokeAt(ctx, g, g.outer + w * (at + width * 0.8), w * width * 0.4, rgba(shade(base, 0.6), 0.45));
 }
 
+/** Battle wear: dents (lit on their far side) and scratches with a bright edge. */
+function battleWear(ctx: Ctx, g: FrameGeometry, base: string, seed: number): void {
+  const w = bandWidth(g);
+  const random = seededRandom(seed);
+  for (const p of alongBand(g, countFor(g, w * 0.8))) {
+    if (random() < 0.35) continue;
+    const across = (random() - 0.5) * w * 0.8;
+    const x = p.x - Math.sin(p.angle) * across;
+    const y = p.y + Math.cos(p.angle) * across;
+    const r = w * (0.08 + random() * 0.14);
+    const dent = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
+    dent.addColorStop(0, "rgba(0, 0, 0, 0.5)");
+    dent.addColorStop(0.7, "rgba(0, 0, 0, 0.2)");
+    dent.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = dent;
+    ctx.beginPath();
+    ctx.ellipse(x, y, r, r * (0.6 + random() * 0.4), random() * Math.PI, 0, Math.PI * 2);
+    ctx.fill();
+    // The lip of the dent catches the light on the side away from it.
+    ctx.strokeStyle = rgba(shade(base, 0.7), 0.45);
+    ctx.lineWidth = Math.max(0.5, w * 0.025);
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.85, 0, Math.PI * 0.6);
+    ctx.stroke();
+  }
+  ctx.lineCap = "round";
+  for (const p of alongBand(g, countFor(g, w * 0.35))) {
+    if (random() < 0.3) continue;
+    const across = (random() - 0.5) * w;
+    const x = p.x - Math.sin(p.angle) * across;
+    const y = p.y + Math.cos(p.angle) * across;
+    const a = p.angle + (random() - 0.5) * 2.2;
+    const len = w * (0.15 + random() * 0.45);
+    const bend = (random() - 0.5) * w * 0.12;
+    const dx = Math.cos(a) * len;
+    const dy = Math.sin(a) * len;
+    for (const [offset, colour, width] of [
+      [w * 0.012, rgba(shade(base, 0.8), 0.55), 0.016],
+      [0, "rgba(0, 0, 0, 0.55)", 0.014],
+    ] as const) {
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = Math.max(0.5, w * width);
+      ctx.beginPath();
+      ctx.moveTo(x - dx / 2 + offset, y - dy / 2 + offset);
+      ctx.quadraticCurveTo(x - Math.sin(a) * bend + offset, y + Math.cos(a) * bend + offset, x + dx / 2 + offset, y + dy / 2 + offset);
+      ctx.stroke();
+    }
+  }
+}
+
 // Classic ------------------------------------------------------------------
 
 const polished: Finish = {
@@ -156,33 +206,19 @@ const engraved: Finish = {
 const riveted: Finish = {
   lighting: { light: 0.75, dark: 0.8 },
   step: 0.35,
-  texture: (ctx, g, _t, base) =>
-    hammerTexture(ctx, g, rgba(shade(base, -0.6), 0.25), rgba(shade(base, 0.6), 0.25), 4),
+  texture: (ctx, g, _t, base) => {
+    hammerTexture(ctx, g, rgba(shade(base, -0.6), 0.25), rgba(shade(base, 0.6), 0.25), 4);
+    battleWear(ctx, g, base, 0xf16);
+  },
   ornament: (ctx, g, base) => {
     const w = bandWidth(g);
-    const r = w * 0.12;
-    for (const p of alongBand(g, ornamentCount(g.shape, 16), 0.33)) {
+    const r = w * 0.16;
+    for (const p of alongBand(g, ornamentCount(g.shape, 12), 0.33)) {
       raised(ctx, w);
       sphere(ctx, p.x, p.y, r, shade(base, 0.05));
     }
     noShadow(ctx);
   },
-};
-
-const hammered: Finish = {
-  lighting: { light: 0.7, dark: 0.8 },
-  step: 0.35,
-  texture: (ctx, g, _t, base) => {
-    hammerTexture(ctx, g, rgba(shade(base, -0.55), 0.22), rgba(shade(base, 0.4), 0.18), 3, 2.2);
-    hammerTexture(ctx, g, rgba(shade(base, -0.7), 0.4), rgba(shade(base, 0.9), 0.7), 9);
-  },
-};
-
-const burnished: Finish = {
-  lighting: { light: 0.95, dark: 0.85, highlight: "#fff4a8" },
-  step: 0.4,
-  texture: (ctx, g, _t, base) =>
-    hammerTexture(ctx, g, rgba(shade(base, -0.6), 0.2), rgba(mix(base, "#fff4c8", 0.85), 0.35), 5),
 };
 
 /** Glowing glyphs: short strokes picked from a little alphabet. */
@@ -196,7 +232,8 @@ const RUNES: number[][][] = [
   [[-0.5, -1, 0.5, -1], [0, -1, 0, 1], [-0.5, 1, 0.5, 1]],
 ];
 
-const arcane: Finish = {
+function runic(runeSize: number, spacing: number): Finish {
+  return {
   base: (c) => mix(shade(c, -0.8), "#20222b", 0.5),
   lighting: { light: 0.45, dark: 0.7, highlight: "#8a8f9c" },
   step: 0.3,
@@ -209,11 +246,11 @@ const arcane: Finish = {
     ctx.shadowBlur = w * 0.5;
     strokeAt(ctx, g, g.inner - w * 0.3, w * 0.035, rgba(glow, 0.9));
     ctx.strokeStyle = glow;
-    ctx.lineWidth = Math.max(1, w * 0.05);
+    ctx.lineWidth = Math.max(1, w * 0.05 * (runeSize / 0.17));
     ctx.lineCap = "round";
     const random = seededRandom(0x7a1);
-    const size = w * 0.17;
-    for (const p of alongBand(g, countFor(g, w * 0.5, 0.36), 0.36)) {
+    const size = w * runeSize;
+    for (const p of alongBand(g, countFor(g, w * spacing, 0.36), 0.36)) {
       const rune = RUNES[Math.floor(random() * RUNES.length)];
       atPoint(ctx, p, () => {
         ctx.beginPath();
@@ -226,7 +263,10 @@ const arcane: Finish = {
     }
     ctx.restore();
   },
-};
+  };
+}
+
+const arcane = runic(0.17, 0.5);
 
 // Textures ----------------------------------------------------------------
 
@@ -363,43 +403,36 @@ function ropeStrands(ctx: Ctx, g: FrameGeometry, base: string, seed = 0x40e): vo
   }
 }
 
-const rope: Finish = {
-  lighting: { light: 0.55, dark: 0.7 },
-  step: 0,
-  texture: (ctx, g, _t, base) => ropeStrands(ctx, g, base),
-};
-
-const scales: Finish = {
-  lighting: { light: 0.75, dark: 0.8 },
-  step: 0.25,
-  texture: (ctx, g, _t, base) => {
-    const w = bandWidth(g);
-    const r = w * 0.2;
-    for (const [at, shift] of [[0.15, 0], [0.45, 0.5], [0.75, 0], [1.02, 0.5]] as const) {
-      const pts = alongBand(g, countFor(g, r * 1.6, at), at);
-      pts.forEach((p, i) => {
-        const q = pts[(i + (shift ? 1 : 0)) % pts.length];
-        const x = shift ? (p.x + q.x) / 2 : p.x;
-        const y = shift ? (p.y + q.y) / 2 : p.y;
-        atPoint(ctx, { x, y, angle: p.angle }, () => {
-          const gradient = ctx.createLinearGradient(0, -r, 0, r);
-          gradient.addColorStop(0, rgba(shade(base, 0.45), 0.5));
-          gradient.addColorStop(1, rgba(shade(base, -0.5), 0.35));
-          ctx.fillStyle = gradient;
-          ctx.beginPath();
-          ctx.arc(0, -r * 0.2, r, 0, Math.PI);
-          ctx.closePath();
-          ctx.fill();
-          ctx.strokeStyle = rgba(shade(base, -0.8), 0.7);
-          ctx.lineWidth = Math.max(0.6, w * 0.025);
-          ctx.beginPath();
-          ctx.arc(0, -r * 0.2, r, 0, Math.PI);
-          ctx.stroke();
-        });
+/** Overlapping scales in staggered rows, `size` of the band across. */
+function drawScales(ctx: Ctx, g: FrameGeometry, base: string, size: number): void {
+  const w = bandWidth(g);
+  const r = w * size;
+  let row = 0;
+  for (let at = 0.15; at < 1.1; at += size * 1.5, row++) {
+    const shift = row % 2 === 1;
+    const pts = alongBand(g, countFor(g, r * 1.6, at), at);
+    pts.forEach((p, i) => {
+      const q = pts[(i + (shift ? 1 : 0)) % pts.length];
+      const x = shift ? (p.x + q.x) / 2 : p.x;
+      const y = shift ? (p.y + q.y) / 2 : p.y;
+      atPoint(ctx, { x, y, angle: p.angle }, () => {
+        const gradient = ctx.createLinearGradient(0, -r, 0, r);
+        gradient.addColorStop(0, rgba(shade(base, 0.45), 0.5));
+        gradient.addColorStop(1, rgba(shade(base, -0.5), 0.35));
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(0, -r * 0.2, r, 0, Math.PI);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = rgba(shade(base, -0.8), 0.7);
+        ctx.lineWidth = Math.max(0.6, w * 0.025 * (size / 0.2));
+        ctx.beginPath();
+        ctx.arc(0, -r * 0.2, r, 0, Math.PI);
+        ctx.stroke();
       });
-    }
-  },
-};
+    });
+  }
+}
 
 const vines: Finish = {
   base: (c) => mix(c, "#4a3320", 0.55),
@@ -410,10 +443,10 @@ const vines: Finish = {
     const w = bandWidth(g);
     const leaf = g.color;
     const steps = countFor(g, w * 0.08);
-    const waves = Math.max(4, Math.round(countFor(g, w * 1.2) / 1));
+    const waves = Math.max(4, countFor(g, w * 1.8));
     raised(ctx, w, 0.45);
     ctx.strokeStyle = shade(leaf, -0.35);
-    ctx.lineWidth = w * 0.07;
+    ctx.lineWidth = w * 0.1;
     ctx.lineCap = "round";
     wavyLine(ctx, g, 0.5, steps, (_i, t) => Math.sin(t * Math.PI * 2 * waves) * w * 0.22);
     ctx.stroke();
@@ -423,7 +456,7 @@ const vines: Finish = {
       atPoint(ctx, p, () => {
         ctx.translate(0, side * w * 0.1);
         ctx.rotate(side * 0.9);
-        ctx.scale(1.5, 1.5);
+        ctx.scale(2.3, 2.3);
         const gradient = ctx.createLinearGradient(0, -w * 0.15, 0, w * 0.15);
         gradient.addColorStop(0, shade(leaf, 0.35));
         gradient.addColorStop(1, shade(leaf, -0.3));
@@ -438,54 +471,6 @@ const vines: Finish = {
     noShadow(ctx);
     ctx.strokeStyle = rgba(shade(leaf, -0.6), 0.6);
     ctx.lineWidth = Math.max(0.5, w * 0.012);
-  },
-};
-
-const frost: Finish = {
-  base: (c) => mix(c, "#dff3ff", 0.35),
-  lighting: { light: 0.9, dark: 0.55, highlight: "#ffffff" },
-  step: 0.35,
-  texture: (ctx, g, _t, base) => {
-    const w = bandWidth(g);
-    const random = seededRandom(0xf205);
-    ctx.lineCap = "round";
-    for (const p of alongBand(g, countFor(g, w * 0.35))) {
-      atPoint(ctx, p, () => {
-        ctx.translate((random() - 0.5) * w * 0.3, (random() - 0.5) * w * 0.8);
-        ctx.rotate(random() * Math.PI);
-        const len = w * (0.15 + random() * 0.3);
-        ctx.strokeStyle = rgba("#ffffff", 0.5);
-        ctx.lineWidth = Math.max(0.5, w * 0.015);
-        ctx.beginPath();
-        ctx.moveTo(-len, 0);
-        ctx.lineTo(len, 0);
-        for (const t of [-0.5, 0, 0.5]) {
-          ctx.moveTo(t * len, 0);
-          ctx.lineTo(t * len + len * 0.25, -len * 0.25);
-          ctx.moveTo(t * len, 0);
-          ctx.lineTo(t * len + len * 0.25, len * 0.25);
-        }
-        ctx.stroke();
-        ctx.strokeStyle = rgba(shade(base, -0.5), 0.25);
-        ctx.beginPath();
-        ctx.moveTo(-len, w * 0.02);
-        ctx.lineTo(len, w * 0.02);
-        ctx.stroke();
-      });
-    }
-    // Glints.
-    for (const p of alongBand(g, countFor(g, w * 0.5), 0.3)) {
-      if (random() < 0.5) continue;
-      const s = w * (0.05 + random() * 0.06);
-      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y - s);
-      ctx.quadraticCurveTo(p.x, p.y, p.x + s, p.y);
-      ctx.quadraticCurveTo(p.x, p.y, p.x, p.y + s);
-      ctx.quadraticCurveTo(p.x, p.y, p.x - s, p.y);
-      ctx.quadraticCurveTo(p.x, p.y, p.x, p.y - s);
-      ctx.fill();
-    }
   },
 };
 
@@ -602,38 +587,6 @@ const starfield: Finish = {
   },
 };
 
-const bones: Finish = {
-  base: (c) => mix(shade(c, -0.75), "#2a2420", 0.4),
-  lighting: { light: 0.4, dark: 0.7 },
-  step: 0.25,
-  texture: (ctx, g, tables, base) => marble(ctx, g, tables, base, 0xb0e5),
-  ornament: (ctx, g) => {
-    const w = bandWidth(g);
-    const bone = g.color;
-    const pts = alongBand(g, countFor(g, w * 0.95), 0.42);
-    pts.forEach((p, i) => {
-      atPoint(ctx, p, () => {
-        ctx.rotate(i % 2 ? 0.25 : -0.25);
-        raised(ctx, w, 0.6);
-        const len = w * 0.36;
-        const gradient = ctx.createLinearGradient(0, -w * 0.12, 0, w * 0.12);
-        gradient.addColorStop(0, shade(bone, 0.5));
-        gradient.addColorStop(1, shade(bone, -0.35));
-        ctx.fillStyle = gradient;
-        ctx.fillRect(-len, -w * 0.045, len * 2, w * 0.09);
-        for (const x of [-len, len]) {
-          for (const y of [-w * 0.06, w * 0.06]) {
-            ctx.beginPath();
-            ctx.arc(x, y, w * 0.075, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
-      });
-    });
-    noShadow(ctx);
-  },
-};
-
 // Classes -----------------------------------------------------------------
 
 /** Barbarian: hide, with three-claw gashes. */
@@ -642,13 +595,14 @@ const claws: Finish = {
   step: 0.3,
   texture: (ctx, g, _t, base) => {
     hammerTexture(ctx, g, rgba(shade(base, -0.5), 0.25), rgba(shade(base, 0.4), 0.15), 10, 0.5, 0xc1a);
+    battleWear(ctx, g, base, 0xba4);
     const w = bandWidth(g);
     const random = seededRandom(0xc1a3);
     ctx.lineCap = "round";
     for (const p of alongBand(g, ornamentCount(g.shape, 6), 0.5)) {
       atPoint(ctx, p, () => {
         ctx.rotate(0.7 + (random() - 0.5) * 0.4);
-        ctx.scale(1.4, 1.3);
+        ctx.scale(1.7, 1.5);
         for (const dx of [-0.16, 0, 0.16]) {
           ctx.strokeStyle = "rgba(20, 5, 0, 0.9)";
           ctx.lineWidth = w * 0.09;
@@ -682,9 +636,9 @@ const notes: Finish = {
     const w = bandWidth(g);
     const ink = "#f3d27a";
     const random = seededRandom(0xba7e);
-    for (const p of alongBand(g, countFor(g, w * 1.2), 0.45)) {
+    for (const p of alongBand(g, countFor(g, w * 1.7), 0.5)) {
       atPoint(ctx, p, () => {
-        ctx.scale(1.7, 1.7);
+        ctx.scale(2.5, 2.5);
         raised(ctx, w, 0.6);
         ctx.fillStyle = ink;
         ctx.strokeStyle = ink;
@@ -723,15 +677,15 @@ const radiant: Finish = {
   step: 0.3,
   texture: (ctx, g, _t, base) => {
     const w = bandWidth(g);
-    const pts = alongBand(g, ornamentCount(g.shape, countFor(g, w * 0.3)), 0.7);
+    const pts = alongBand(g, ornamentCount(g.shape, countFor(g, w * 0.42)), 0.7);
     pts.forEach((p, i) => {
       atPoint(ctx, p, () => {
         const long = i % 2 === 0;
         ctx.fillStyle = long ? rgba(mix(base, "#fffbe0", 0.7), 0.7) : rgba(shade(base, -0.4), 0.45);
         ctx.beginPath();
-        ctx.moveTo(-w * 0.07, w * 0.1);
-        ctx.lineTo(0, -(long ? w * 0.75 : w * 0.5));
-        ctx.lineTo(w * 0.07, w * 0.1);
+        ctx.moveTo(-w * 0.1, w * 0.15);
+        ctx.lineTo(0, -(long ? w * 0.85 : w * 0.6));
+        ctx.lineTo(w * 0.1, w * 0.15);
         ctx.closePath();
         ctx.fill();
       });
@@ -741,7 +695,7 @@ const radiant: Finish = {
     const w = bandWidth(g);
     for (const p of alongBand(g, ornamentCount(g.shape, 4), 0.5)) {
       raised(ctx, w);
-      sphere(ctx, p.x, p.y, w * 0.18, mix(base, "#fff1b0", 0.3));
+      sphere(ctx, p.x, p.y, w * 0.3, mix(base, "#fff1b0", 0.3));
     }
     noShadow(ctx);
   },
@@ -758,8 +712,11 @@ const beads: Finish = {
     const bead = mix(g.color, "#3a2010", 0.55);
     const pts = alongBand(g, countFor(g, w * 0.62));
     pts.forEach((p, i) => {
+      const k = i % 9;
+      // Every ninth is a large jade bead; its neighbours make way for it.
+      if (k === 1 || k === 8) return;
       raised(ctx, w);
-      sphere(ctx, p.x, p.y, w * (i % 9 === 0 ? 0.3 : 0.24), i % 9 === 0 ? "#3d8c6a" : bead);
+      sphere(ctx, p.x, p.y, w * (k === 0 ? 0.5 : 0.27), k === 0 ? "#3d8c6a" : bead);
     });
     noShadow(ctx);
   },
@@ -777,12 +734,12 @@ const holy: Finish = {
     pts.forEach((p) => {
       atPoint(ctx, p, () => {
         raised(ctx, w);
-        const s = w * 0.3;
+        const s = w * 0.48;
         const gradient = ctx.createLinearGradient(-s, -s, s, s);
         gradient.addColorStop(0, "#fff0b8");
         gradient.addColorStop(1, shade(gold, -0.45));
         ctx.fillStyle = gradient;
-        const t = w * 0.07;
+        const t = w * 0.1;
         ctx.fillRect(-s * 0.7, -t, s * 1.4, t * 2);
         ctx.fillRect(-t, -s, t * 2, s * 2);
       });
@@ -790,7 +747,7 @@ const holy: Finish = {
     const mid = alongBand(g, pts.length * 2, 0.42).filter((_p, i) => i % 2 === 1);
     for (const p of mid) {
       raised(ctx, w, 0.4);
-      sphere(ctx, p.x, p.y, w * 0.08, "#3b6fd8");
+      sphere(ctx, p.x, p.y, w * 0.14, "#3b6fd8");
     }
     noShadow(ctx);
   },
@@ -802,20 +759,20 @@ const fletching: Finish = {
   step: 0.25,
   texture: (ctx, g, _t, base) => {
     const w = bandWidth(g);
-    const pts = alongBand(g, countFor(g, w * 0.28), 0.38);
+    const pts = alongBand(g, countFor(g, w * 0.4), 0.45);
     pts.forEach((p, i) => {
       atPoint(ctx, p, () => {
         ctx.strokeStyle = i % 4 < 2 ? rgba(shade(base, 0.5), 0.55) : rgba(mix(base, "#b0402a", 0.5), 0.7);
-        ctx.lineWidth = w * 0.06;
+        ctx.lineWidth = w * 0.09;
         ctx.lineJoin = "round";
         ctx.beginPath();
-        ctx.moveTo(-w * 0.12, -w * 0.3);
-        ctx.lineTo(w * 0.1, 0);
-        ctx.lineTo(-w * 0.12, w * 0.3);
+        ctx.moveTo(-w * 0.18, -w * 0.42);
+        ctx.lineTo(w * 0.14, 0);
+        ctx.lineTo(-w * 0.18, w * 0.42);
         ctx.stroke();
       });
     });
-    strokeAt(ctx, g, g.outer + w * 0.38, w * 0.03, rgba(shade(base, -0.7), 0.7));
+    strokeAt(ctx, g, g.outer + w * 0.45, w * 0.04, rgba(shade(base, -0.7), 0.7));
   },
 };
 
@@ -828,20 +785,21 @@ const stitched: Finish = {
     const w = bandWidth(g);
     for (const at of [0.16, 0.66]) {
       strokeAt(ctx, g, g.outer + w * at, w * 0.05, "rgba(0, 0, 0, 0.35)");
-      for (const p of alongBand(g, countFor(g, w * 0.16, at), at)) {
+      for (const p of alongBand(g, countFor(g, w * 0.24, at), at)) {
         atPoint(ctx, p, () => {
+          ctx.rotate(-0.35);
           ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
-          ctx.lineWidth = w * 0.035;
+          ctx.lineWidth = w * 0.055;
           ctx.lineCap = "round";
           ctx.beginPath();
-          ctx.moveTo(-w * 0.045, w * 0.01);
-          ctx.lineTo(w * 0.045, w * 0.01);
+          ctx.moveTo(-w * 0.07, w * 0.015);
+          ctx.lineTo(w * 0.07, w * 0.015);
           ctx.stroke();
           ctx.strokeStyle = "#d8cbb0";
-          ctx.lineWidth = w * 0.025;
+          ctx.lineWidth = w * 0.04;
           ctx.beginPath();
-          ctx.moveTo(-w * 0.045, 0);
-          ctx.lineTo(w * 0.045, 0);
+          ctx.moveTo(-w * 0.07, 0);
+          ctx.lineTo(w * 0.07, 0);
           ctx.stroke();
         });
       }
@@ -849,27 +807,36 @@ const stitched: Finish = {
   },
 };
 
-/** Artificer: brass with a toothed outer edge and little gears. */
+/** Artificer: brass, its inner edge cut into gear teeth, with little gears on the band. */
 const clockwork: Finish = {
   lighting: { light: 0.9, dark: 0.8, highlight: "#fff1c0" },
   step: 0.3,
   texture: (ctx, g, tables, base) => marble(ctx, g, tables, base, 0xc10c, 0.5),
   ornament: (ctx, g, base) => {
     const w = bandWidth(g);
-    // Teeth stand off the outer edge.
-    const teeth = alongBand(g, countFor(g, w * 0.4, 0), 0);
+    // Teeth reach in from the inner edge, like a ring gear's.
     ctx.save();
-    raised(ctx, w);
-    for (const p of teeth) {
+    raised(ctx, w, 0.6);
+    for (const p of alongBand(g, countFor(g, w * 0.6, 1), 1)) {
+      const l = localLight(p);
       atPoint(ctx, p, () => {
-        ctx.fillStyle = shade(base, -0.15);
-        ctx.fillRect(-w * 0.1, -w * 0.12, w * 0.2, w * 0.16);
+        const gradient = ctx.createLinearGradient(l.x * w * 0.15, l.y * w * 0.15, -l.x * w * 0.15, -l.y * w * 0.15);
+        gradient.addColorStop(0, shade(base, 0.35));
+        gradient.addColorStop(1, shade(base, -0.45));
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.moveTo(-w * 0.17, -w * 0.05);
+        ctx.lineTo(-w * 0.1, w * 0.3);
+        ctx.lineTo(w * 0.1, w * 0.3);
+        ctx.lineTo(w * 0.17, -w * 0.05);
+        ctx.closePath();
+        ctx.fill();
       });
     }
     ctx.restore();
     for (const p of alongBand(g, ornamentCount(g.shape, 6), 0.45)) {
       raised(ctx, w);
-      const r = w * 0.22;
+      const r = w * 0.36;
       ctx.fillStyle = shade(base, 0.2);
       ctx.beginPath();
       for (let i = 0; i < 16; i++) {
@@ -890,7 +857,7 @@ const clockwork: Finish = {
   },
 };
 
-/** Eyes that watch from the ring (Warlock, Beholder). */
+/** Eyes that watch from the ring (Warlock). */
 function eyesOrnament(ctx: Ctx, g: FrameGeometry, count: number, iris: string, scale: number): void {
   const w = bandWidth(g);
   const random = seededRandom(0xe7e5);
@@ -932,118 +899,18 @@ const eyes: Finish = {
   lighting: { light: 0.5, dark: 0.75 },
   step: 0.25,
   texture: (ctx, g, tables, base) => marble(ctx, g, tables, base, 0xe7e, 1.4),
-  ornament: (ctx, g) => eyesOrnament(ctx, g, ornamentCount(g.shape, 6), "#c7e04a", 0.36),
+  ornament: (ctx, g) => eyesOrnament(ctx, g, ornamentCount(g.shape, 6), "#c7e04a", 0.5),
 };
 
-const beholder: Finish = {
-  ...eyes,
-  ornament: (ctx, g) => eyesOrnament(ctx, g, countFor(g, bandWidth(g) * 1.1), "#d63a2a", 0.3),
+/** Sorcerer: large draconic scales. */
+const sorcerer: Finish = {
+  lighting: { light: 0.75, dark: 0.8 },
+  step: 0.25,
+  texture: (ctx, g, _t, base) => drawScales(ctx, g, base, 0.3),
 };
 
-// Strange -----------------------------------------------------------------
-
-/** A mimic's mouth: gums, and teeth biting inwards. */
-const teeth: Finish = {
-  base: (c) => mix(c, "#7a1e2a", 0.4),
-  lighting: { light: 0.55, dark: 0.75, highlight: "#f2a3a8" },
-  step: 0,
-  texture: (ctx, g, tables, base) => marble(ctx, g, tables, base, 0x7ee7, 1.2),
-  ornament: (ctx, g) => {
-    const w = bandWidth(g);
-    const random = seededRandom(0x7ee8);
-    const pts = alongBand(g, countFor(g, w * 0.34, 1), 1);
-    for (const p of pts) {
-      const len = w * (0.35 + random() * 0.3);
-      atPoint(ctx, p, () => {
-        raised(ctx, w, 0.6);
-        const gradient = ctx.createLinearGradient(-w * 0.15, 0, w * 0.15, 0);
-        gradient.addColorStop(0, "#fffbea");
-        gradient.addColorStop(1, "#b9a77e");
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.moveTo(-w * 0.15, -w * 0.05);
-        ctx.quadraticCurveTo(-w * 0.1, len * 0.6, 0, len);
-        ctx.quadraticCurveTo(w * 0.1, len * 0.6, w * 0.15, -w * 0.05);
-        ctx.closePath();
-        ctx.fill();
-      });
-    }
-    noShadow(ctx);
-  },
-};
-
-/** A gelatinous cube's edge: green jelly with bubbles and drips. */
-const slime: Finish = {
-  base: (c) => c,
-  lighting: { light: 0.85, dark: 0.55, highlight: "#f0ffd0" },
-  step: 0,
-  texture: (ctx, g, _t, base) => {
-    const w = bandWidth(g);
-    const random = seededRandom(0x51e);
-    for (const p of alongBand(g, countFor(g, w * 0.22))) {
-      const across = (random() - 0.5) * w * 0.9;
-      const x = p.x - Math.sin(p.angle) * across;
-      const y = p.y + Math.cos(p.angle) * across;
-      const r = w * (0.03 + random() ** 2 * 0.12);
-      ctx.strokeStyle = rgba(shade(base, 0.6), 0.6);
-      ctx.lineWidth = Math.max(0.5, w * 0.015);
-      ctx.fillStyle = rgba(shade(base, -0.3), 0.25);
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-      ctx.beginPath();
-      ctx.arc(x - r * 0.35, y - r * 0.35, r * 0.25, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  },
-  ornament: (ctx, g, base) => {
-    const w = bandWidth(g);
-    const random = seededRandom(0x51f);
-    for (const p of alongBand(g, ornamentCount(g.shape, 9), 1)) {
-      const len = w * (0.45 + random() * 0.55);
-      const r = w * (0.11 + random() * 0.05);
-      atPoint(ctx, p, () => {
-        const gradient = ctx.createLinearGradient(-r, 0, r, 0);
-        gradient.addColorStop(0, shade(base, 0.35));
-        gradient.addColorStop(1, shade(base, -0.35));
-        ctx.fillStyle = gradient;
-        // A drop hanging from the inner edge: wide where it leaves, round at the end.
-        ctx.beginPath();
-        ctx.moveTo(-r * 2, -w * 0.05);
-        ctx.bezierCurveTo(-r * 0.6, len * 0.25, -r * 0.7, len - r * 1.6, -r, len - r);
-        ctx.arc(0, len - r, r, Math.PI, 0, true);
-        ctx.bezierCurveTo(r * 0.7, len - r * 1.6, r * 0.6, len * 0.25, r * 2, -w * 0.05);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
-        ctx.beginPath();
-        ctx.arc(-r * 0.35, len - r * 1.2, r * 0.25, 0, Math.PI * 2);
-        ctx.fill();
-      });
-    }
-  },
-};
-
-/** Red and white stripes, as on a sweet. */
-const candy: Finish = {
-  base: () => "#f4efe8",
-  lighting: { light: 0.9, dark: 0.45, highlight: "#ffffff" },
-  step: 0,
-  texture: (ctx, g) => {
-    const w = bandWidth(g);
-    for (const p of alongBand(g, countFor(g, w * 0.55))) {
-      atPoint(ctx, p, () => {
-        ctx.rotate(-0.7);
-        ctx.fillStyle = rgba(g.color, 0.9);
-        ctx.fillRect(-w * 0.1, -w, w * 0.2, w * 2);
-      });
-    }
-    // Gloss.
-    strokeAt(ctx, g, g.outer + w * 0.3, w * 0.12, "rgba(255, 255, 255, 0.25)");
-  },
-};
+/** Wizard: the Arcane band with larger runes. */
+const wizard = runic(0.26, 0.7);
 
 export const FINISHES = {
   line: polished,
@@ -1051,20 +918,14 @@ export const FINISHES = {
   gilded,
   engraved,
   riveted,
-  hammered,
-  burnished,
   arcane,
   wood,
   stone,
-  rope,
-  scales,
   vines,
-  frost,
   magma,
   harlequin,
   braid,
   starfield,
-  bones,
   claws,
   notes,
   radiant,
@@ -1074,10 +935,8 @@ export const FINISHES = {
   stitched,
   clockwork,
   eyes,
-  beholder,
-  teeth,
-  slime,
-  candy,
+  sorcerer,
+  wizard,
 } satisfies Record<string, Finish>;
 
 export type FinishStyle = keyof typeof FINISHES;

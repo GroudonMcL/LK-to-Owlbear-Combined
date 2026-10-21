@@ -326,3 +326,14 @@ secret art withheld, and a player's token saved visible to Owlbear storage.
 - Owlbear can't send a broadcast to one player, so the pass goes to every browser in the
   room and only the asking player keeps it.
 - Passes can't be withdrawn one by one: they expire, or all go when the password changes.
+
+**Follow-up after review**
+- Frames trimmed to the ones kept: Classic (Stamped, Gilded, Engraved, Arcane, Infernal,
+  Double line, Polished, No frame), Textures (Oak, Cobblestone, Magma, Harlequin,
+  Knotwork, Starfield) and every class frame. Silver, Iron-bound, Forged steel, Ember
+  gold, Rope, Dragon scale, Vines, Frost, Ossuary and the Strange group were removed. A
+  saved look that used one of them falls back to Stamped.
+- Class ornaments are larger: notes, leaves, jade beads, eyes, crosses, suns, fletching,
+  stitches and runes. Sorcerer and Wizard got their own larger-scale finishes.
+  Barbarian and Fighter now have dents and scratches from battle. The Artificer's inner
+  edge is cut into gear teeth instead of the row of teeth outside.
