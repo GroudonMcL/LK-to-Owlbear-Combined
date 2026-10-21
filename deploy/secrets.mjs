@@ -1,5 +1,5 @@
 // Validates the LegendKeeper secrets from the repository secrets and writes
-// them as a JSON file for `wrangler secret bulk`. The file path comes from
+// them as a JSON file for `wrangler deploy --secrets-file`. The file path comes from
 // argv and should live in $RUNNER_TEMP; values are never printed.
 //
 // Env: LK_API_KEYS (or LK_API_KEY, the name the Page Link extension used),
