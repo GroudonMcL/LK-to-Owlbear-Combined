@@ -15,6 +15,7 @@ import { LkApiError, LkClient, LkNetworkError } from "./lk/client.js";
 import { toContent } from "./lk/content.js";
 import { extractPage, type ExtractedImage } from "./lk/extract.js";
 import type {
+  LkBoardContent,
   LkDocumentBlocks,
   LkList,
   LkNode,
@@ -170,6 +171,8 @@ export interface PageServiceOptions {
 }
 
 const MAX_PAGE_DOCUMENTS = 8;
+/** Board tabs read for images; each is one more LegendKeeper call. */
+const MAX_BOARD_DOCUMENTS = 4;
 /**
  * listResources calls (100 resources each) per chunk. With the project lookup
  * this stays well under Cloudflare's 50 outbound calls per request, and a
@@ -340,7 +343,27 @@ export class PageService {
       }),
     );
 
-    const extracted = await extractPage({ resource, documents });
+    const boardDocs = (resource.documents ?? [])
+      .filter((d) => d.type === "board" && !d.deletedAt)
+      .sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0));
+    if (boardDocs.length > MAX_BOARD_DOCUMENTS) {
+      warnings.push(`Only the first ${MAX_BOARD_DOCUMENTS} of ${boardDocs.length} boards were scanned for images.`);
+    }
+    const boards = await Promise.all(
+      boardDocs.slice(0, MAX_BOARD_DOCUMENTS).map(async (doc) => {
+        try {
+          const content = await client.get<LkBoardContent>(`${base}/docs/${encodeURIComponent(doc.id)}/board`);
+          return { doc, content };
+        } catch (err) {
+          const mapped = mapUpstreamError(err, notFound);
+          if (mapped.code === "UPSTREAM_AUTH" || mapped.code === "RATE_LIMITED") throw mapped;
+          warnings.push(`The board "${doc.name}" could not be read, so its images are missing.`);
+          return { doc, content: null };
+        }
+      }),
+    );
+
+    const extracted = await extractPage({ resource, documents, boards });
     const details: PageDetails = {
       projectId,
       id: resource.id,

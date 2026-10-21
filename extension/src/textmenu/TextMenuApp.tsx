@@ -1,5 +1,6 @@
 // The right-click menu's "LegendKeeper pages" embed: the pages found in the
-// selected note or Text item. Clicking one opens it.
+// selected note or Text item. Clicking one opens it. A note's badge opens the
+// same list as a popover, naming the item (?item=) and the popover (?popover=).
 
 import { useEffect, useState } from "react";
 import { describeOpenError, openTextMatch } from "../lib/open";
@@ -11,14 +12,18 @@ import { useTextMatches } from "../ui/useTextMatches";
 export function TextMenuApp({ platform }: { platform: Platform }) {
   useTheme(platform);
   const state = useTextMatches(platform);
-  const [itemId, setItemId] = useState<string | null>(null);
+  const params = new URLSearchParams(window.location.search);
+  const forItem = params.get("item");
+  const popoverId = params.get("popover");
+  const [itemId, setItemId] = useState<string | null>(forItem);
 
   useEffect(() => {
+    if (forItem) return;
     void platform
       .getSelection()
       .then((ids) => setItemId(ids[0] ?? null))
       .catch(() => setItemId(null));
-  }, [platform]);
+  }, [platform, forItem]);
 
   let body;
   if (state.kind === "loading") {
@@ -37,9 +42,9 @@ export function TextMenuApp({ platform }: { platform: Platform }) {
         showHeads={false}
         compact
         onOpen={(page) =>
-          void openTextMatch(platform, { resourceId: page.id, name: page.name }).catch((err: unknown) =>
-            platform.notify(describeOpenError(err), "ERROR"),
-          )
+          void openTextMatch(platform, { resourceId: page.id, name: page.name })
+            .then(() => (popoverId ? platform.closeSidePanel(popoverId) : undefined))
+            .catch((err: unknown) => platform.notify(describeOpenError(err), "ERROR"))
         }
       />
     ) : (

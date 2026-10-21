@@ -70,7 +70,7 @@ export interface SearchResponse {
   limited: boolean;
 }
 
-export type PageImageSource = "block" | "property" | "banner" | "resource";
+export type PageImageSource = "block" | "board" | "property" | "banner" | "resource";
 
 export interface PageImage {
   /** Opaque, stable id for this image within the page (hash of its URL). */

@@ -94,6 +94,8 @@
     emitTo("items", "OBR_SCENE_ITEMS_EVENT_CHANGE", { items: state.items });
     drawMap();
   };
+  const playerChanged = () =>
+    emitTo("player", "OBR_PLAYER_EVENT_CHANGE", { player: { id: USER, role: state.role, selection: state.selection, metadata: {} } });
   const localChanged = () => {
     emitTo("local", "OBR_SCENE_LOCAL_EVENT_CHANGE", { items: state.localItems });
     drawMap();
@@ -161,6 +163,12 @@
     OBR_PLAYER_GET_SELECTION: () => ({ selection: state.selection }),
     OBR_PLAYER_SELECT: (_f, d) => {
       state.selection = d.replace === false ? [...state.selection, ...d.items] : d.items;
+      playerChanged();
+      return {};
+    },
+    OBR_PLAYER_DESELECT: (_f, d) => {
+      state.selection = d.items ? state.selection.filter((id) => !d.items.includes(id)) : [];
+      playerChanged();
       return {};
     },
     OBR_SCENE_IS_READY: () => ({ ready: state.sceneReady }),
@@ -353,6 +361,7 @@
     OBR_ROOM_METADATA_SUBSCRIBE: "roomMeta",
     OBR_SCENE_READY_SUBSCRIBE: "ready",
     OBR_THEME_SUBSCRIBE: "theme",
+    OBR_PLAYER_SUBSCRIBE: "player",
   };
 
   window.addEventListener("message", async (event) => {

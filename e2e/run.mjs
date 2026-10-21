@@ -153,10 +153,10 @@ async function main() {
   const extOrigin = () => page.frames().find((f) => f.url().startsWith(WORKER));
   const savedKey = await extOrigin().evaluate(() => JSON.parse(localStorage.getItem("lkob.settings.v1") ?? "{}").apiKey);
   check("the API key is kept in this browser's storage", savedKey === API_KEY);
-  await pop.getByText("The Test Realm: 7 pages, updated just now").waitFor();
+  await pop.getByText("The Test Realm: 8 pages, updated just now").waitFor();
   check("connecting loads the page list and says so", true);
   await pop.getByRole("button", { name: "Refresh page list" }).click();
-  await pop.getByText("The Test Realm: 7 pages, updated just now").waitFor();
+  await pop.getByText("The Test Realm: 8 pages, updated just now").waitFor();
   check("then how many pages it has and when it was updated", true);
   await shot("01-settings-connected");
   await pop.getByRole("button", { name: "Done" }).click();
@@ -494,7 +494,7 @@ async function main() {
   }, { ns: NS, items: [plain("goblin-token", "goblin.png", "Goblin Boss"), linkedVillain, plain("other", "token-09.png", ""), textItem("p-text", "Ancient Red Dragon and The Hollow Queen")] });
   await player.evaluate(() => window.host.boot());
   const playerPop = player.frameLocator("#popover");
-  await playerPop.getByText("The Test Realm: 5 pages, updated just now").waitFor();
+  await playerPop.getByText("The Test Realm: 6 pages, updated just now").waitFor();
   check("players get the page-opening view, not the importer", (await playerPop.getByText("Choose artwork").count()) === 0 && (await playerPop.getByRole("button", { name: "Owlbear panel" }).isVisible()));
   await playerPop.locator(".text-link", { hasText: "Ancient Red Dragon" }).waitFor();
   check("players see public pages named in the scene, never hidden ones", (await playerPop.locator(".text-link", { hasText: "Mordrith" }).count()) === 0);

@@ -13,6 +13,7 @@ import { LINK_KEY, parseLink } from "./lib/links";
 import { describeOpenError, linkToken, openForToken } from "./lib/open";
 import { loadPageList, PAGE_LIST_STATUS_KEY, readStatus } from "./lib/pageLists";
 import { publishProject } from "./lib/project";
+import { SCENE_LINK_SETTINGS_KEY } from "./lib/sceneLinkSettings";
 import { loadSettings, requestNavigation, SETTINGS_STORAGE_KEY } from "./lib/settings";
 import { PageMatcher, type ItemTextMatches } from "./lib/textMatch";
 import { isToken, TOKEN_FILTER } from "./lib/token";
@@ -29,6 +30,7 @@ import {
   TEXT_MENU_ID,
 } from "./platform/channels";
 import { obrPlatform } from "./platform/obr";
+import { SceneLinks } from "./sceneLinks";
 import type { PlacementRequest } from "./platform/types";
 
 const FALLBACK_TOOL = "rodeo.owlbear.tool/move";
@@ -94,6 +96,8 @@ async function setupContextMenus(): Promise<void> {
 // matches come from public pages only.
 
 let textMatcher: PageMatcher | null = null;
+// Underlines, click areas and badges on the map (created once OBR is ready).
+let sceneLinks: SceneLinks | null = null;
 let textMenuKey: string | null = null;
 let textTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -130,10 +134,13 @@ async function scanText(items?: Item[]): Promise<void> {
     const role = await OBR.player.getRole();
     const list = await loadPageList(obrPlatform, role);
     if (textMatcher?.pages !== list.pages) textMatcher = new PageMatcher(list.pages);
-    await setTextMenu(textMatcher.matchItems(items ?? (await OBR.scene.items.getItems())));
+    const sceneItems = items ?? (await OBR.scene.items.getItems());
+    await setTextMenu(textMatcher.matchItems(sceneItems));
+    await sceneLinks?.update(sceneItems, textMatcher, role);
   } catch {
     // Not connected yet, or LegendKeeper unreachable: no menu until the next change.
     await setTextMenu([]).catch(() => undefined);
+    await sceneLinks?.clear();
   }
 }
 
@@ -297,11 +304,13 @@ function scheduleIndexSync(): void {
 }
 
 OBR.onReady(async () => {
+  sceneLinks = new SceneLinks();
   await setupContextMenus();
   void syncRoomProject();
   // The popover (another frame of this extension) saved new settings.
   window.addEventListener("storage", (e) => {
     if (e.key === PAGE_LIST_STATUS_KEY && readStatus()?.state === "ready") scheduleTextScan();
+    if (e.key === SCENE_LINK_SETTINGS_KEY) scheduleTextScan();
     if (e.key !== SETTINGS_STORAGE_KEY) return;
     void syncRoomProject();
     scheduleTextScan();
@@ -318,6 +327,7 @@ OBR.onReady(async () => {
   });
   OBR.scene.onReadyChange((ready) => {
     seenIds = null;
+    sceneLinks?.reset();
     scheduleTextScan();
     if (!ready) return;
     scheduleIndexSync();

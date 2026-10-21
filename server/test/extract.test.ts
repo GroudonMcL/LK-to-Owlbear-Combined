@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractPage, imageIdFor, runsToText } from "../src/core/lk/extract.js";
-import type { LkDocument, LkNode, LkResource } from "../src/core/lk/types.js";
+import type { LkBoardContent, LkDocument, LkNode, LkResource } from "../src/core/lk/types.js";
 import { buildFixtures } from "./mockLk.js";
 
 const A = "https://assets.example";
@@ -52,6 +52,28 @@ describe("extractPage", () => {
   it("does not read a size out of prose and handles pages without images", async () => {
     const result = await page("village", [["v1", "Main"]]);
     expect(result.size).toBeNull();
+    expect(result.images).toEqual([]);
+  });
+
+  it("adds board images in reading order after the page tabs, once each", async () => {
+    const resource = fixtures.resources.ogre as LkResource;
+    const result = await extractPage({
+      resource,
+      documents: [{ doc: doc("o1", "Main"), blocks: fixtures.blocks["ogre/o1"] as LkNode[] }],
+      boards: [{ doc: { ...doc("o2", "Gallery"), type: "board" }, content: fixtures.boards["ogre/o2"] as LkBoardContent }],
+    });
+    expect(result.images.map((i) => [i.source, i.label, i.url.split("/").pop()])).toEqual([
+      ["block", "Ogre", "ogre-main.png"],
+      ["board", "Gallery · image 1", "ogre-face.png"],
+      ["board", "Gallery · image 2", "ogre-club.png"],
+      ["board", "Gallery · image 3", "ogre-spare.png"],
+    ]);
+    expect(result.images[1]).toMatchObject({ documentName: "Gallery", alt: "face.png" });
+  });
+
+  it("skips boards that could not be read", async () => {
+    const resource = fixtures.resources.ogre as LkResource;
+    const result = await extractPage({ resource, documents: [], boards: [{ doc: doc("o2", "Gallery"), content: null }] });
     expect(result.images).toEqual([]);
   });
 
