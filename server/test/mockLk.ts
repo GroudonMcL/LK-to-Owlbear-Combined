@@ -86,6 +86,8 @@ export interface MockLk {
   assetBase: string;
   /** Requests seen, as "METHOD path". */
   requests: string[];
+  /** Requests that carried an API key, as "KEY METHOD path". */
+  authorizedRequests: string[];
   /** Override: respond to the next N calls of a path prefix with a status. */
   failNext(pathPrefix: string, status: number, code: string, times?: number, headers?: Record<string, string>): void;
   /** Makes the project public, so its public pages can be listed without a key. */
@@ -306,6 +308,7 @@ export function buildFixtures(assetBase: string) {
 
 export async function startMockLk(listenPort = 0): Promise<MockLk> {
   const requests: string[] = [];
+  const authorizedRequests: string[] = [];
   const failures: { prefix: string; status: number; code: string; times: number; headers: Record<string, string> }[] = [];
   let isPublic = false;
   const pngs: Record<string, Buffer> = {
@@ -325,6 +328,8 @@ export async function startMockLk(listenPort = 0): Promise<MockLk> {
     const url = new URL(req.url ?? "/", "http://mock");
     const pathname = url.pathname.replace(/\/$/, "");
     requests.push(`${req.method} ${pathname}`);
+    const auth = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
+    if (auth) authorizedRequests.push(`${auth} ${req.method} ${pathname}`);
 
     const json = (status: number, body: unknown, headers: Record<string, string> = {}) => {
       res.writeHead(status, { "Content-Type": "application/json", "x-request-id": "req_mock", ...headers });
@@ -429,6 +434,7 @@ export async function startMockLk(listenPort = 0): Promise<MockLk> {
     baseUrl,
     assetBase,
     requests,
+    authorizedRequests,
     failNext(prefix, status, code, times = 1, headers = {}) {
       failures.push({ prefix, status, code, times, headers });
     },

@@ -13,9 +13,12 @@ const status = (patch: Partial<PageListStatus>): PageListStatus => ({
 });
 
 describe("page list status line", () => {
-  it("says the project is loading, with progress once there is some", () => {
+  it("says the list is loading, or being built with progress once there is some", () => {
     expect(describeStatus(status({ state: "loading", count: 0 }), now)).toBe("D&D - Greyhawk: loading pages…");
-    expect(describeStatus(status({ state: "loading", count: 4500 }), now)).toBe("D&D - Greyhawk: loading pages… 4,500 so far");
+    expect(describeStatus(status({ state: "loading", building: true, count: 0 }), now)).toBe("D&D - Greyhawk: building the page list…");
+    expect(describeStatus(status({ state: "loading", building: true, count: 4500 }), now)).toBe(
+      "D&D - Greyhawk: building the page list… 4,500 pages so far",
+    );
   });
 
   it("says how many pages and when", () => {

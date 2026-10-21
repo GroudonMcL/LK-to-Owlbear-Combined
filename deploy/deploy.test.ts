@@ -8,6 +8,14 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { loadConfig } from "../server/src/core/config.js";
+import { createHandler } from "../server/src/core/handler.js";
+import { LkClient } from "../server/src/core/lk/client.js";
+import { MemoryPageListStore } from "../server/src/core/pageListStore.js";
+import { PageService, ProjectResolver } from "../server/src/core/services.js";
+import { toNodeListener } from "../server/src/node/adapter.js";
+import { safeFetch } from "../server/src/node/safeFetch.js";
+import { API_KEY, PROJECT_ID, startMockLk, type MockLk } from "../server/test/mockLk.js";
 
 const exec = promisify(execFile);
 const here = path.dirname(new URL(import.meta.url).pathname);
@@ -108,5 +116,95 @@ describe("deploy/prepare.mjs", () => {
     const r = await prepare(workspace(), { CLOUDFLARE_API_TOKEN: "" });
     expect(r.code).toBe(1);
     expect(r.out).toContain("CLOUDFLARE_API_TOKEN");
+  });
+});
+
+describe("deploy/secrets.mjs", () => {
+  async function secrets(env: Record<string, string>) {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "lkob-secrets-"));
+    const file = path.join(dir, "s.json");
+    try {
+      const r = await exec("node", [path.join(here, "secrets.mjs"), file], { env: { ...process.env, ...env } });
+      return { code: 0, out: r.stdout + r.stderr, json: JSON.parse(readFileSync(file, "utf8")) };
+    } catch (err) {
+      const e = err as { code: number; stdout: string; stderr: string };
+      return { code: e.code, out: e.stdout + e.stderr, json: null };
+    }
+  }
+
+  it("writes the bulk-secrets file without printing values", async () => {
+    const r = await secrets({ LK_API_KEYS: "lk_secret_value", LKOB_ACCESS_TOKENS: "a-long-access-token-0123456789" });
+    expect(r.code).toBe(0);
+    expect(r.json).toEqual({ LK_API_KEYS: "lk_secret_value", LKOB_ACCESS_TOKENS: "a-long-access-token-0123456789" });
+    expect(r.out).not.toContain("lk_secret_value");
+  });
+
+  it("accepts the Page Link extension's singular LK_API_KEY secret", async () => {
+    const r = await secrets({ LK_API_KEYS: "", LK_API_KEY: "lk_single", LKOB_ACCESS_TOKENS: "a-long-access-token-0123456789" });
+    expect(r.code).toBe(0);
+    expect(r.json.LK_API_KEYS).toBe("lk_single");
+  });
+
+  it("rejects a missing key or password", async () => {
+    expect((await secrets({ LK_API_KEYS: "", LK_API_KEY: "", LKOB_ACCESS_TOKENS: "a-long-access-token-0123456789" })).code).toBe(1);
+    const noPassword = await secrets({ LK_API_KEYS: "k", LKOB_ACCESS_TOKENS: " " });
+    expect(noPassword.code).toBe(1);
+    expect(noPassword.out).toContain("LKOB_ACCESS_TOKENS");
+  });
+
+  it("accepts a short password", async () => {
+    const r = await secrets({ LK_API_KEYS: "k", LKOB_ACCESS_TOKENS: "goblin" });
+    expect(r.code).toBe(0);
+    expect(r.json.LKOB_ACCESS_TOKENS).toBe("goblin");
+  });
+});
+
+describe("deploy/page-list.mjs", () => {
+  let lk: MockLk;
+  let worker: http.Server;
+  let url = "";
+  let pageLists: MemoryPageListStore;
+
+  beforeAll(async () => {
+    lk = await startMockLk();
+    const config = loadConfig({ LK_BASE_URL: lk.baseUrl, LK_API_KEYS: API_KEY, LKOB_ACCESS_TOKENS: "pw1, pw2", LKOB_TOKEN_HOSTING: "off" });
+    const projects = new ProjectResolver();
+    pageLists = new MemoryPageListStore();
+    const pages = new PageService(projects, {
+      lkBaseUrl: lk.baseUrl,
+      pageLists,
+      listRequestsPerChunk: 2,
+      maxSourceImageBytes: config.maxSourceImageBytes,
+      assetHostAllowlist: null,
+      allowInsecureAssetFetch: true,
+      fetchImage: safeFetch,
+    });
+    const makeClient = (apiKey: string) => new LkClient({ baseUrl: lk.baseUrl, apiKey, sleep: async () => {} });
+    worker = http.createServer(toNodeListener(createHandler({ config, projects, pages, tokens: null, makeClient, log: () => {} })));
+    await new Promise<void>((r) => worker.listen(0, "127.0.0.1", r));
+    url = `http://127.0.0.1:${(worker.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((r) => worker.close(() => r()));
+    await lk.close();
+  });
+
+  async function warm(env: Record<string, string>) {
+    const r = await exec("node", [path.join(here, "page-list.mjs")], { env: { ...process.env, ...env } });
+    return r.stdout + r.stderr;
+  }
+
+  it("builds both stored lists for every project, with the first password, printing neither secret", async () => {
+    const out = await warm({ WORKER_URL: url, LKOB_ACCESS_TOKENS: "pw1, pw2" });
+    expect(out).toMatch(/The Test Realm: \d+ pages for the GM, 0 public\./);
+    expect(out).not.toContain("pw1");
+    expect(JSON.parse((await pageLists.get(`page-list/gm/${PROJECT_ID}`))!).resources.length).toBeGreaterThan(5);
+    expect(await pageLists.get(`page-list/public/${PROJECT_ID}`)).not.toBeNull();
+  });
+
+  it("warns instead of failing the deploy", async () => {
+    const out = await warm({ WORKER_URL: url, LKOB_ACCESS_TOKENS: "wrong" });
+    expect(out).toContain("::warning::Page lists not built: The server didn't accept that access password.");
   });
 });

@@ -8,6 +8,7 @@ import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LkClient } from "../src/core/lk/client.js";
 import { PageService, ProjectResolver } from "../src/core/services.js";
+import { MemoryPageListStore } from "../src/core/pageListStore.js";
 import { safeFetch } from "../src/node/safeFetch.js";
 import { API_KEY, buildFixtures, PROJECT_ID, startMockLk, type MockLk } from "./mockLk.js";
 
@@ -106,17 +107,18 @@ describe("the client only calls endpoints the spec defines", () => {
     const caller = { keyId: "k", client: new LkClient({ baseUrl: lk.baseUrl, apiKey: API_KEY, sleep: async () => {} }) };
     const pages = new PageService(projects, {
       lkBaseUrl: lk.baseUrl,
+      pageLists: new MemoryPageListStore(),
       maxSourceImageBytes: 10_000_000,
       assetHostAllowlist: null,
       allowInsecureAssetFetch: true,
       fetchImage: safeFetch,
     });
-    await projects.list(caller, true);
+    await projects.projectOf(caller, true);
     await pages.search(caller, PROJECT_ID, "goblin", 25);
     const page = await pages.getPage(caller, PROJECT_ID, "goblin");
     await pages.getImage(caller, PROJECT_ID, "goblin", page.details.images[0].id);
-    await pages.resourceChunk(caller, PROJECT_ID, "");
-    await pages.publicResourceChunk(PROJECT_ID, "");
+    await pages.buildPageListStep(caller, PROJECT_ID, { audience: "gm", buildId: "spec01", part: 0, cursor: "" });
+    await pages.buildPageListStep(caller, PROJECT_ID, { audience: "public", buildId: "spec02", part: 0, cursor: "" });
 
     const apiCalls = lk.requests.filter((r) => r.includes("/api/"));
     expect(apiCalls.length).toBeGreaterThan(3);

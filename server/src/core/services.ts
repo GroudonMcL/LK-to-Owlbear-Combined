@@ -2,11 +2,14 @@ import type {
   PageContent,
   PageDetails,
   ListedResource,
+  PageListAudience,
+  PageListBuildResult,
+  PageListBuildStep,
   ProjectsResponse,
-  ResourceChunk,
   ProjectSummary,
   SearchHit,
   SearchResponse,
+  StoredPageList,
 } from "@lkob/shared";
 import { InFlight, TtlCache } from "./cache.js";
 import { HttpError } from "./errors.js";
@@ -25,6 +28,7 @@ import type {
   LkSearchResult,
 } from "./lk/types.js";
 import { SafeFetchError, type ImageFetcher } from "./imageFetch.js";
+import type { PageListStore } from "./pageListStore.js";
 
 /** Translates a LegendKeeper failure into a response the extension can act on. */
 export function mapUpstreamError(err: unknown, notFound: HttpError): HttpError {
@@ -44,14 +48,15 @@ export function mapUpstreamError(err: unknown, notFound: HttpError): HttpError {
     }
     if (err.status === 401 || err.status === 402 || err.status === 403) {
       const reasons: Record<string, string> = {
-        UNAUTHENTICATED: "LegendKeeper didn't accept your API key: it may be mistyped, revoked or expired.",
+        UNAUTHENTICATED:
+          "LegendKeeper didn't accept the server's API key: it may be mistyped, revoked or expired. Update the LK_API_KEYS secret and deploy again.",
         PAID_PLAN_REQUIRED: "LegendKeeper API keys need the project owner to be on a paid plan.",
         SUBSCRIPTION_LAPSED: "The LegendKeeper project owner's plan has lapsed.",
-        WRONG_PROJECT: "Your API key belongs to a different LegendKeeper project.",
-        FORBIDDEN: "Your API key can't open that LegendKeeper project.",
-        INSUFFICIENT_SCOPE: "Your LegendKeeper API key lacks a required scope.",
+        WRONG_PROJECT: "The server's API key belongs to a different LegendKeeper project.",
+        FORBIDDEN: "The server's API key can't open that LegendKeeper project.",
+        INSUFFICIENT_SCOPE: "The server's LegendKeeper API key lacks a required scope.",
       };
-      return new HttpError(502, "UPSTREAM_AUTH", reasons[err.code] ?? `LegendKeeper refused your API key (${err.code}).`, ids);
+      return new HttpError(502, "UPSTREAM_AUTH", reasons[err.code] ?? `LegendKeeper refused the server's API key (${err.code}).`, ids);
     }
     if (err.status >= 500) {
       return new HttpError(502, "UPSTREAM_UNAVAILABLE", "LegendKeeper had a temporary problem. Try again.", { retryable: true, ...ids });
@@ -62,9 +67,9 @@ export function mapUpstreamError(err: unknown, notFound: HttpError): HttpError {
 }
 
 /**
- * Whoever is calling: a LegendKeeper client holding the API key the
- * extension sent, and a short digest of that key. Every cache is keyed by
- * the digest, so one key's results (hidden pages, say) never answer another.
+ * One of the server's LegendKeeper API keys (from LK_API_KEYS): a client
+ * holding it, and a short name for it. Caches are keyed by the name, so one
+ * key's results never answer for another.
  */
 export interface Caller {
   keyId: string;
@@ -85,27 +90,59 @@ export class ProjectResolver {
       try {
         const list = await caller.client.get<LkList<LkProject>>("/api/v3/projects", { limit: 1 });
         const found = list.data?.[0];
-        if (!found) throw new HttpError(502, "UPSTREAM_AUTH", "Your API key doesn't open any LegendKeeper project.");
+        if (!found) throw new HttpError(502, "UPSTREAM_AUTH", "The server's API key doesn't open any LegendKeeper project.");
         return { id: found.id, name: found.name ?? found.id, isPublic: found.isPublic ?? false };
       } catch (err) {
-        throw mapUpstreamError(err, new HttpError(502, "UPSTREAM_AUTH", "Your API key doesn't open any LegendKeeper project."));
+        throw mapUpstreamError(err, new HttpError(502, "UPSTREAM_AUTH", "The server's API key doesn't open any LegendKeeper project."));
       }
     });
     this.cache.set(caller.keyId, project);
     return project;
   }
 
-  async list(caller: Caller, fresh = false): Promise<ProjectsResponse> {
-    return { projects: [await this.projectOf(caller, fresh)] };
-  }
-
   /** The caller's project, which must be `projectId`: a key opens only its own project. */
   async require(caller: Caller, projectId: string): Promise<ProjectSummary> {
     const project = await this.projectOf(caller);
-    if (project.id !== projectId) {
-      throw new HttpError(403, "WRONG_PROJECT", "Your API key belongs to a different LegendKeeper project. Choose it again in Settings.");
-    }
+    if (project.id !== projectId) throw notConfigured();
     return project;
+  }
+}
+
+function notConfigured(): HttpError {
+  return new HttpError(
+    404,
+    "PROJECT_NOT_CONFIGURED",
+    "This server has no API key for that LegendKeeper project. Add one to the LK_API_KEYS secret and deploy again, or choose another project in Settings.",
+  );
+}
+
+/** The server's API keys, one per project, and which project each opens. */
+export class ServerKeys {
+  constructor(
+    readonly callers: Caller[],
+    private readonly projects: ProjectResolver,
+  ) {}
+
+  /** Every project the keys open. A key LegendKeeper refuses is left out, unless all are. */
+  async list(fresh = false): Promise<ProjectsResponse> {
+    const results = await Promise.allSettled(this.callers.map((c) => this.projects.projectOf(c, fresh)));
+    const projects = new Map<string, ProjectSummary>();
+    for (const r of results) if (r.status === "fulfilled" && !projects.has(r.value.id)) projects.set(r.value.id, r.value);
+    if (projects.size === 0) {
+      const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+      if (failed) throw failed.reason;
+    }
+    return { projects: [...projects.values()] };
+  }
+
+  /** The key that opens `projectId`. */
+  async callerFor(projectId: string): Promise<Caller> {
+    const results = await Promise.allSettled(this.callers.map((c) => this.projects.projectOf(c)));
+    const index = results.findIndex((r) => r.status === "fulfilled" && r.value.id === projectId);
+    if (index >= 0) return this.callers[index];
+    // With one key, LegendKeeper's reason (a revoked key, say) says more than "not configured".
+    if (results.length === 1 && results[0].status === "rejected") throw results[0].reason;
+    throw notConfigured();
   }
 }
 
@@ -161,8 +198,9 @@ export interface PageServiceOptions {
   lkFetch?: typeof fetch;
   pageTtlMs?: number;
   searchTtlMs?: number;
-  pageListTtlMs?: number;
-  /** LegendKeeper list calls (100 resources each) per chunk. */
+  /** Where built page lists are kept. */
+  pageLists: PageListStore;
+  /** LegendKeeper list calls (100 resources each) per build step. */
   listRequestsPerChunk?: number;
   maxSourceImageBytes: number;
   assetHostAllowlist: string[] | null;
@@ -170,21 +208,33 @@ export interface PageServiceOptions {
   fetchImage: ImageFetcher;
 }
 
+function listKey(audience: PageListAudience, projectId: string): string {
+  return `page-list/${audience}/${projectId}`;
+}
+
+function versionKey(audience: PageListAudience, projectId: string): string {
+  return `page-list-version/${audience}/${projectId}`;
+}
+
 const MAX_PAGE_DOCUMENTS = 8;
 /** Board tabs read for images; each is one more LegendKeeper call. */
 const MAX_BOARD_DOCUMENTS = 4;
 /**
- * listResources calls (100 resources each) per chunk. With the project lookup
- * this stays well under Cloudflare's 50 outbound calls per request, and a
- * chunk answers in a few seconds.
+ * listResources calls (100 resources each) per build step. With the project
+ * lookup this stays well under Cloudflare's 50 outbound calls per request,
+ * and a step answers in a few seconds.
  */
 const LIST_REQUESTS_PER_CHUNK = 15;
+/** Build steps per list: about 90,000 pages, keeping a stored list well under KV's 25 MB per value. */
+const MAX_LIST_PARTS = 60;
+/** A build's parts are only needed until it finishes. */
+const PART_TTL_SECONDS = 60 * 60;
+const BUILD_ID_PATTERN = /^[A-Za-z0-9_-]{6,64}$/;
 
 export class PageService {
   private readonly pages: TtlCache<string, CachedPage>;
   private readonly searches: TtlCache<string, SearchResponse>;
-  private readonly chunks: TtlCache<string, ResourceChunk>;
-  private readonly chunkFlight = new InFlight<string, ResourceChunk>();
+  private readonly pageLists: PageListStore;
   private readonly listRequestsPerChunk: number;
   private readonly images: TtlCache<string, FetchedImage>;
   private readonly pageFlight = new InFlight<string, CachedPage>();
@@ -198,7 +248,7 @@ export class PageService {
   ) {
     this.pages = new TtlCache({ ttlMs: options.pageTtlMs ?? 60_000, maxEntries: 200 });
     this.searches = new TtlCache({ ttlMs: options.searchTtlMs ?? 30_000, maxEntries: 200 });
-    this.chunks = new TtlCache({ ttlMs: options.pageListTtlMs ?? 5 * 60_000, maxEntries: 60 });
+    this.pageLists = options.pageLists;
     this.listRequestsPerChunk = options.listRequestsPerChunk ?? LIST_REQUESTS_PER_CHUNK;
     this.images = new TtlCache({
       ttlMs: 10 * 60_000,
@@ -230,57 +280,70 @@ export class PageService {
     }
   }
 
-  /**
-   * One slice of the caller's project's resource listing, hidden ones
-   * included, starting at `cursor` ("" for the start). The browser follows
-   * `nextCursor` and builds the page list itself: a big project needs more
-   * LegendKeeper calls than one Worker request may make (50 on Cloudflare's
-   * free plan) and more time than one browser request should wait.
-   */
-  async resourceChunk(caller: Caller, projectId: string, cursor: string, fresh = false): Promise<ResourceChunk> {
-    const key = `gm/${caller.keyId}/${projectId}/${cursor}`;
-    if (!fresh) {
-      const cached = this.chunks.get(key);
-      if (cached) return cached;
-    }
-    const chunk = await this.chunkFlight.run(key, async () => {
-      const project = await this.projects.require(caller, projectId);
-      try {
-        const { resources, nextCursor } = await this.listResources(caller.client, projectId, cursor);
-        return { project: { id: project.id, name: project.name, isPublic: project.isPublic ?? false }, resources, nextCursor };
-      } catch (err) {
-        throw mapUpstreamError(err, new HttpError(404, "PROJECT_NOT_CONFIGURED", "Project not found."));
-      }
-    });
-    this.chunks.set(key, chunk);
-    return chunk;
+  /** A stored page list as JSON text, or null before its first build. */
+  storedPageList(audience: PageListAudience, projectId: string): Promise<string | null> {
+    return this.pageLists.get(listKey(audience, projectId));
+  }
+
+  /** The stored list's `generatedAt`, which is cheap to check before downloading it. */
+  pageListVersion(audience: PageListAudience, projectId: string): Promise<string | null> {
+    return this.pageLists.get(versionKey(audience, projectId));
   }
 
   /**
-   * A slice of a project's public pages, for players, fetched from
-   * LegendKeeper without a key: exactly what an anonymous visitor can see. A
-   * project that refuses anonymous visitors (a private one) gives an empty,
-   * non-public slice.
+   * One step of rebuilding a project's stored page list (see
+   * PageListBuildStep). The GM's list is read with the server's key, hidden
+   * pages included; the public list without a key, so it holds exactly what
+   * an anonymous visitor can see, and nothing for a private project.
    */
-  async publicResourceChunk(projectId: string, cursor: string): Promise<ResourceChunk> {
-    const key = `public/${projectId}/${cursor}`;
-    const cached = this.chunks.get(key);
-    if (cached) return cached;
-    const chunk = await this.chunkFlight.run(key, async () => {
-      // Anonymous visitors can't read the project's name; the extension shows the room's.
-      const project = { id: projectId, name: projectId, isPublic: true };
-      try {
-        const { resources, nextCursor } = await this.listResources(this.anonymous, projectId, cursor);
-        return { project, resources, nextCursor };
-      } catch (err) {
-        if (err instanceof LkApiError && [401, 403, 404].includes(err.status)) {
-          return { project: { ...project, isPublic: false }, resources: [], nextCursor: null };
-        }
-        throw mapUpstreamError(err, new HttpError(404, "PROJECT_NOT_CONFIGURED", "Project not found."));
+  async buildPageListStep(caller: Caller, projectId: string, step: PageListBuildStep): Promise<PageListBuildResult> {
+    if (step.audience !== "gm" && step.audience !== "public") throw new HttpError(400, "BAD_REQUEST", "Unknown page list.");
+    if (!BUILD_ID_PATTERN.test(step.buildId)) throw new HttpError(400, "BAD_REQUEST", "Invalid build id.");
+    if (!Number.isInteger(step.part) || step.part < 0 || step.part >= MAX_LIST_PARTS) throw new HttpError(400, "BAD_REQUEST", "Invalid build step.");
+    if (typeof step.cursor !== "string" || step.cursor.length > 2048 || (step.part === 0) !== (step.cursor === "")) {
+      throw new HttpError(400, "BAD_REQUEST", "Invalid cursor.");
+    }
+    const project = await this.projects.require(caller, projectId);
+    // The public list is public exactly when LegendKeeper lists it to anonymous visitors.
+    let isPublic = step.audience === "public" ? true : (project.isPublic ?? false);
+    let listed: { resources: ListedResource[]; nextCursor: string | null };
+    try {
+      listed = await this.listResources(step.audience === "gm" ? caller.client : this.anonymous, projectId, step.cursor);
+    } catch (err) {
+      // A project that refuses anonymous visitors (a private one) has no public pages.
+      if (step.audience === "public" && err instanceof LkApiError && [401, 403, 404].includes(err.status)) {
+        listed = { resources: [], nextCursor: null };
+        isPublic = false;
+      } else {
+        throw mapUpstreamError(err, notConfigured());
       }
-    });
-    this.chunks.set(key, chunk);
-    return chunk;
+    }
+
+    const part = (n: number) => `page-list-part/${step.audience}/${projectId}/${step.buildId}/${n}`;
+    const last = step.part === MAX_LIST_PARTS - 1;
+    if (listed.nextCursor && !last) {
+      await this.pageLists.put(part(step.part), JSON.stringify(listed.resources), PART_TTL_SECONDS);
+      return { done: false, nextCursor: listed.nextCursor, added: listed.resources.length };
+    }
+
+    const resources: ListedResource[] = [];
+    for (let n = 0; n < step.part; n++) {
+      const raw = await this.pageLists.get(part(n));
+      if (raw === null) throw new HttpError(409, "BAD_REQUEST", "Part of this page-list build expired. Refresh the page list again.");
+      resources.push(...(JSON.parse(raw) as ListedResource[]));
+    }
+    resources.push(...listed.resources);
+    const generatedAt = new Date().toISOString();
+    const list: StoredPageList = {
+      project: { id: project.id, name: project.name, isPublic },
+      audience: step.audience,
+      generatedAt,
+      truncated: Boolean(listed.nextCursor),
+      resources,
+    };
+    await this.pageLists.put(listKey(step.audience, projectId), JSON.stringify(list));
+    await this.pageLists.put(versionKey(step.audience, projectId), generatedAt);
+    return { done: true, nextCursor: null, added: listed.resources.length, total: resources.length, generatedAt };
   }
 
   private async listResources(client: LkClient, projectId: string, cursor: string): Promise<{ resources: ListedResource[]; nextCursor: string | null }> {
@@ -312,7 +375,7 @@ export class PageService {
     await this.projects.require(caller, projectId);
     const client = caller.client;
     const base = `/api/v3/projects/${encodeURIComponent(projectId)}/resources/${encodeURIComponent(resourceId)}`;
-    const notFound = new HttpError(404, "PAGE_NOT_FOUND", "This page no longer exists or your API key cannot see it.");
+    const notFound = new HttpError(404, "PAGE_NOT_FOUND", "This page no longer exists or the server's API key cannot see it.");
     let resource: LkResource;
     try {
       resource = await client.get<LkResource>(base);

@@ -13,7 +13,8 @@
     "html_handling": "none"
   },
   "kv_namespaces": [
-    // The deploy workflow finds or creates the namespace and fills in its id.
+    // Finished tokens and built page lists. The deploy workflow finds or creates
+    // the namespace and fills in its id.
     { "binding": "TOKENS", "id": "00000000000000000000000000000000" }
   ],
   "observability": { "enabled": true }

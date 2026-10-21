@@ -28,12 +28,11 @@ API key and is handled defensively.
 
 **Consequence:** a server-side relay is mandatory, because of CORS. It is deployed as a
 Cloudflare Worker that also hosts the extension, so nothing runs on the GM's computer.
-Since 2026-10-20 the Worker holds no key: the GM pastes the key into the extension, which
-keeps it in the browser's local storage (never in room or scene metadata) and sends it to
-the Worker with each request. The guide's warning about keys in browser code is about
-publishing a key in a page's code; here the key is the GM's own, typed into their own
-browser, and is never part of the extension or shared with players.
-One key covers exactly one project, so "selecting a project" is automatic.
+The key is a Worker secret (`LK_API_KEYS`), behind the extension's own access password,
+and never reaches a browser. (From 2026-10-20 to 10-21 the GM pasted it into the
+extension instead; it went back to the Worker so the Worker can build and keep page lists
+for everyone.) One key covers exactly one project, so the Worker takes one key per
+project and "selecting a project" means choosing among them.
 
 ### Search and page retrieval
 

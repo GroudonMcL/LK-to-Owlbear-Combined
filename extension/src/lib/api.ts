@@ -4,9 +4,11 @@ import type {
   HealthResponse,
   PageContent,
   PageDetails,
+  PageListBuildResult,
+  PageListBuildStep,
   ProjectsResponse,
-  ResourceChunk,
   SearchResponse,
+  StoredPageList,
   TokenUploadResponse,
 } from "@lkob/shared";
 import type { Settings } from "./settings";
@@ -30,13 +32,15 @@ export function isAbort(err: unknown): boolean {
 }
 
 const TIMEOUT_MS = 20_000;
-/** A page-list chunk is up to 15 LegendKeeper calls made one after another. */
-const CHUNK_TIMEOUT_MS = 60_000;
+/** A page-list build step is up to 15 LegendKeeper calls made one after another. */
+const BUILD_STEP_TIMEOUT_MS = 60_000;
+/** A big project's stored list is a few megabytes. */
+const LIST_TIMEOUT_MS = 60_000;
 
 export class ApiClient {
   private readonly base: string;
 
-  constructor(private readonly settings: Pick<Settings, "backendUrl" | "apiKey">) {
+  constructor(private readonly settings: Pick<Settings, "backendUrl" | "accessToken">) {
     this.base = settings.backendUrl.replace(/\/+$/, "");
   }
 
@@ -48,7 +52,7 @@ export class ApiClient {
       response = await fetch(this.base + path, {
         ...init,
         signal: combined,
-        headers: { ...(auth ? { Authorization: `Bearer ${this.settings.apiKey}` } : {}), ...(init.headers ?? {}) },
+        headers: { ...(auth ? { Authorization: `Bearer ${this.settings.accessToken}` } : {}), ...(init.headers ?? {}) },
       });
     } catch (err) {
       if (signal?.aborted) throw new ApiError("Cancelled", "aborted", "ABORTED", false);
@@ -86,7 +90,7 @@ export class ApiClient {
   }
 
   async health(): Promise<HealthResponse> {
-    // Health is public; requesting it confirms the URL, not the key.
+    // Health is public; requesting it confirms the URL, not the password.
     let res: Response;
     try {
       res = await fetch(`${this.base}/api/health`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -99,7 +103,7 @@ export class ApiClient {
     return body;
   }
 
-  /** The project the API key opens; this is also how a key is checked. */
+  /** The projects the server's API keys open; this is also how the password is checked. */
   projects(refresh = false): Promise<ProjectsResponse> {
     return this.json(`/api/projects${refresh ? "?refresh=1" : ""}`);
   }
@@ -126,18 +130,30 @@ export class ApiClient {
     );
   }
 
-  /** A slice of the project's pages, hidden ones included (needs the API key). Follow `nextCursor`. */
-  async resourceChunk(projectId: string, cursor: string, fresh = false): Promise<ResourceChunk> {
-    const q = new URLSearchParams({ cursor, ...(fresh ? { fresh: "1" } : {}) });
-    const res = await this.request(`/api/projects/${encodeURIComponent(projectId)}/resources?${q}`, {}, undefined, true, CHUNK_TIMEOUT_MS);
-    return (await res.json()) as ResourceChunk;
+  /** The server's stored page list, hidden pages included; "unchanged" if it is still `since`. */
+  async pageList(projectId: string, since: string | null): Promise<StoredPageList | "unchanged"> {
+    const q = since ? `?${new URLSearchParams({ since })}` : "";
+    const res = await this.request(`/api/projects/${encodeURIComponent(projectId)}/page-list${q}`, {}, undefined, true, LIST_TIMEOUT_MS);
+    return res.status === 204 ? "unchanged" : ((await res.json()) as StoredPageList);
   }
 
-  /** A slice of the project's public pages; open to players, who have no API key. */
-  async publicResourceChunk(projectId: string, cursor: string): Promise<ResourceChunk> {
-    const q = new URLSearchParams({ cursor });
-    const res = await this.request(`/api/public/projects/${encodeURIComponent(projectId)}/resources?${q}`, {}, undefined, false, CHUNK_TIMEOUT_MS);
-    return (await res.json()) as ResourceChunk;
+  /** The project's stored public page list; open to players, who have no password. */
+  async publicPageList(projectId: string, since: string | null): Promise<StoredPageList | "unchanged"> {
+    const q = since ? `?${new URLSearchParams({ since })}` : "";
+    const res = await this.request(`/api/public/projects/${encodeURIComponent(projectId)}/page-list${q}`, {}, undefined, false, LIST_TIMEOUT_MS);
+    return res.status === 204 ? "unchanged" : ((await res.json()) as StoredPageList);
+  }
+
+  /** One step of rebuilding the server's stored page list from LegendKeeper. */
+  async buildPageListStep(projectId: string, step: PageListBuildStep): Promise<PageListBuildResult> {
+    const res = await this.request(
+      `/api/projects/${encodeURIComponent(projectId)}/page-list/build`,
+      { method: "POST", body: JSON.stringify(step), headers: { "Content-Type": "application/json" } },
+      undefined,
+      true,
+      BUILD_STEP_TIMEOUT_MS,
+    );
+    return (await res.json()) as PageListBuildResult;
   }
 
   async imageBlob(projectId: string, resourceId: string, imageId: string, signal?: AbortSignal): Promise<Blob> {

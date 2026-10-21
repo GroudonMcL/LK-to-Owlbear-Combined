@@ -5,6 +5,7 @@ import http from "node:http";
 import path from "node:path";
 import { ConfigError, loadConfig } from "../core/config.js";
 import { createHandler, VERSION } from "../core/handler.js";
+import { MemoryPageListStore } from "../core/pageListStore.js";
 import { PageService, ProjectResolver } from "../core/services.js";
 import { toNodeListener } from "./adapter.js";
 import { FileTokenStore } from "./fileTokenStore.js";
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
   const projects = new ProjectResolver();
   const pages = new PageService(projects, {
     lkBaseUrl: config.lkBaseUrl,
+    pageLists: new MemoryPageListStore(),
     maxSourceImageBytes: config.maxSourceImageBytes,
     assetHostAllowlist: config.assetHostAllowlist,
     allowInsecureAssetFetch: config.allowInsecureAssetFetch,
@@ -38,7 +40,7 @@ async function main(): Promise<void> {
   }
 
   if (config.allowedOrigins === "*") {
-    console.warn("LKOB_ALLOWED_ORIGINS is not set: any origin may call the API (an API key is still required).");
+    console.warn("LKOB_ALLOWED_ORIGINS is not set: any origin may call the API (the access password is still required).");
   }
   if (tokens && !config.publicBaseUrl) {
     console.warn("LKOB_PUBLIC_URL is not set: token URLs will be derived from the request's Host header.");
@@ -51,7 +53,7 @@ async function main(): Promise<void> {
   server.requestTimeout = 60_000;
   server.listen(config.port, config.host, () => {
     console.log(`LegendKeeper for Owlbear server ${VERSION} on http://${config.host}:${config.port}`);
-    console.log(`Token hosting ${tokens ? "on" : "off"}. LegendKeeper API keys come from the extension.`);
+    console.log(`Token hosting ${tokens ? "on" : "off"}. ${config.lkApiKeys.length} LegendKeeper API key(s) configured.`);
   });
 
   const shutdown = () => server.close(() => process.exit(0));

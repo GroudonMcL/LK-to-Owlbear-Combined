@@ -24,8 +24,8 @@ export function PopoverApp({ platform }: { platform: Platform }) {
   const textMatches = useTextMatches(platform);
 
   const api = useMemo(
-    () => (settings.backendUrl && settings.apiKey ? new ApiClient(settings) : null),
-    [settings.backendUrl, settings.apiKey],
+    () => (settings.backendUrl && settings.accessToken ? new ApiClient(settings) : null),
+    [settings.backendUrl, settings.accessToken],
   );
 
   useEffect(() => {
