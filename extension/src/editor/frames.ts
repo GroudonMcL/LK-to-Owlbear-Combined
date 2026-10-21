@@ -2,6 +2,7 @@
 // token shape, so every frame works with every shape at any resolution.
 
 import { mix, rgba, shade } from "./color";
+import { frameImage, isImageFrame } from "./imageFrames";
 import type { FrameStyle, ShapeId } from "./model";
 import { samplePerimeter, shapePolygon, type Point } from "./shapes";
 
@@ -292,7 +293,7 @@ function drawBurnished(ctx: Ctx, g: FrameGeometry): void {
   strokeAt(ctx, g, g.inner - w * 0.02, w * 0.04, rgba(shade(g.color, -0.85), 0.85));
 }
 
-const PAINTERS: Record<Exclude<FrameStyle, "none">, (ctx: Ctx, g: FrameGeometry) => void> = {
+const PAINTERS: Record<Exclude<FrameStyle, "none" | "stampedColour" | "stampedGrey">, (ctx: Ctx, g: FrameGeometry) => void> = {
   line: drawLine,
   double: drawDouble,
   gilded: drawGilded,
@@ -306,6 +307,15 @@ const PAINTERS: Record<Exclude<FrameStyle, "none">, (ctx: Ctx, g: FrameGeometry)
 export function drawFrame(ctx: Ctx, style: FrameStyle, g: FrameGeometry): void {
   if (style === "none" || g.inner <= g.outer) return;
   ctx.save();
-  PAINTERS[style](ctx, g);
+  if (isImageFrame(style)) {
+    // The artwork, scaled to the frame's outer edge. Not loaded yet: nothing.
+    const image = frameImage(style);
+    const r = g.R - g.outer;
+    if (image) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(image, -r, -r, 2 * r, 2 * r);
+    }
+  } else PAINTERS[style](ctx, g);
   ctx.restore();
 }

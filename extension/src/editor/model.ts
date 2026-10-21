@@ -3,7 +3,18 @@
 
 export type ShapeId = "circle" | "rounded" | "square" | "hexagon" | "hexagonFlat";
 
-export type FrameStyle = "none" | "line" | "double" | "gilded" | "engraved" | "arcane" | "riveted" | "hammered" | "burnished";
+export type FrameStyle =
+  | "none"
+  | "line"
+  | "double"
+  | "gilded"
+  | "engraved"
+  | "arcane"
+  | "riveted"
+  | "hammered"
+  | "burnished"
+  | "stampedColour"
+  | "stampedGrey";
 
 export interface TokenStyle {
   shape: ShapeId;
@@ -68,6 +79,9 @@ export interface FramePreset {
 
 /** A small, cohesive set: a few excellent frames beats many inconsistent ones. */
 export const FRAME_PRESETS: FramePreset[] = [
+  // Artwork frames (imageFrames.ts): circles of a fixed thickness.
+  { id: "stamped-colour", name: "Stamped Colour", style: { frame: "stampedColour", frameColor: "#d7671f", borderWidth: 0.2, margin: 0 } },
+  { id: "stamped-grey", name: "Stamped Grey", style: { frame: "stampedGrey", frameColor: "#9a9a9a", borderWidth: 0.2, margin: 0 } },
   { id: "gilded", name: "Gilded", style: { frame: "gilded", frameColor: "#d4a64a", borderWidth: 0.1, margin: 0.04 } },
   { id: "silver", name: "Silver", style: { frame: "gilded", frameColor: "#b8c2cf", borderWidth: 0.1, margin: 0.04 } },
   { id: "engraved", name: "Engraved", style: { frame: "engraved", frameColor: "#7a7f8a", borderWidth: 0.12, margin: 0.04 } },
@@ -89,6 +103,11 @@ export const DEFAULT_STYLE: TokenStyle = {
   backingOpacity: 1,
   frameOpacity: 1,
 };
+
+/** Artwork frames are circles, whatever shape is chosen. */
+export function effectiveShape(style: Pick<TokenStyle, "shape" | "frame">): ShapeId {
+  return style.frame === "stampedColour" || style.frame === "stampedGrey" ? "circle" : style.shape;
+}
 
 export const SHAPES: { id: ShapeId; name: string }[] = [
   { id: "circle", name: "Circle" },

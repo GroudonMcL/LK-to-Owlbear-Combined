@@ -7,6 +7,7 @@ import { Field, Segmented, Slider } from "../ui/components";
 import { useAuthedImage } from "../ui/useAuthedImage";
 import { isValidHex } from "./color";
 import {
+  effectiveShape,
   FRAME_PRESETS,
   SHAPES,
   type ExportSize,
@@ -16,6 +17,7 @@ import {
   type ShapeId,
   type TokenStyle,
 } from "./model";
+import { isImageFrame } from "./imageFrames";
 import { renderToken, type RenderSource } from "./render";
 import { shapePolygon } from "./shapes";
 
@@ -191,14 +193,22 @@ export function Controls(props: {
   const { style, onStyle, transform, onTransform, adjustments, onAdjustments, token, onToken, output, onOutput } = props;
   const pct = (v: number) => `${Math.round(v * 100)}%`;
   const preset = FRAME_PRESETS.find((p) => p.id === props.presetId);
+  const artworkFrame = isImageFrame(style.frame);
   const detected = props.detectedSize;
 
   return (
     <div className="panel-scroll scroll">
       <Section icon={<Frame className="lead" />} title="Frame & shape" note={preset?.name ?? "Custom"} open>
-        <div className="shape-row" role="group" aria-label="Shape">
+        <div className="shape-row" role="group" aria-label="Shape" title={artworkFrame ? "This frame is a circle" : undefined}>
           {SHAPES.map((s) => (
-            <button key={s.id} type="button" className="shape-btn" aria-pressed={style.shape === s.id} onClick={() => onStyle({ shape: s.id })}>
+            <button
+              key={s.id}
+              type="button"
+              className="shape-btn"
+              aria-pressed={effectiveShape(style) === s.id}
+              disabled={artworkFrame}
+              onClick={() => onStyle({ shape: s.id })}
+            >
               <ShapeGlyph shape={s.id} />
               {s.name}
             </button>
@@ -217,8 +227,13 @@ export function Controls(props: {
       <Section icon={<Paintbrush className="lead" />} title="Border & backing">
         {style.frame !== "none" && (
           <>
-            <ColorPicker label="Border colour" value={style.frameColor} colors={FRAME_COLORS} onChange={(frameColor) => onStyle({ frameColor })} />
-            <Slider label="Thickness" min={0.01} max={0.25} step={0.005} value={style.borderWidth} format={pct} onChange={(borderWidth) => onStyle({ borderWidth })} />
+            {/* Artwork frames bring their own colours and thickness. */}
+            {!artworkFrame && (
+              <>
+                <ColorPicker label="Border colour" value={style.frameColor} colors={FRAME_COLORS} onChange={(frameColor) => onStyle({ frameColor })} />
+                <Slider label="Thickness" min={0.01} max={0.25} step={0.005} value={style.borderWidth} format={pct} onChange={(borderWidth) => onStyle({ borderWidth })} />
+              </>
+            )}
             <Slider label="Frame opacity" min={0.1} max={1} step={0.05} value={style.frameOpacity} format={pct} onChange={(frameOpacity) => onStyle({ frameOpacity })} />
           </>
         )}

@@ -1,4 +1,7 @@
-import { createCanvas, type Canvas } from "@napi-rs/canvas";
+import { createCanvas, loadImage, type Canvas } from "@napi-rs/canvas";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { setFrameImage } from "../src/editor/imageFrames";
 import { describe, expect, it } from "vitest";
 import { applyAdjustments, removeFlatBackground } from "../src/editor/adjust";
 import type { Ctx } from "../src/editor/frames";
@@ -257,5 +260,22 @@ describe("adjustments", () => {
     expect(alpha(0, 0)).toBe(0);
     expect(alpha(2, 2)).toBe(255); // enclosed white survives
     expect(alpha(1, 1)).toBe(255); // subject untouched
+  });
+});
+
+describe("artwork frames", () => {
+  it("draw the ring over the art with no gap, always as a circle", async () => {
+    const ring = await loadImage(readFileSync(path.join(__dirname, "../public/frames/stamped-colour.webp")));
+    setFrameImage("stampedColour", ring as unknown as CanvasImageSource);
+    const preset = FRAME_PRESETS.find((p) => p.id === "stamped-colour")!;
+    // Square chosen, but the frame is a circle: the corners stay clear.
+    const style: TokenStyle = { ...DEFAULT_STYLE, ...preset.style, shape: "square", backingOpacity: 0 };
+    const img = render(256, solidSource(100, 100, "#00ff00"), style, DEFAULT_TRANSFORM);
+    expect(alphaAt(img, 2, 2)).toBe(0);
+    expect(rgbAt(img, 128, 128)).toEqual([0, 255, 0]);
+    // Every pixel from the centre out to the ring is covered, in all four directions.
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      for (let r = 0; r <= 120; r++) expect(alphaAt(img, 128 + dx * r, 128 + dy * r)).toBe(255);
+    }
   });
 });

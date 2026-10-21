@@ -1,12 +1,14 @@
 // "Link LK Page…" and the "Open LK Page" fallback: choose a token's page from
 // the page list. A GM's choice is saved on the token for everyone; a player's
-// only in their browser.
+// only in their browser. In "share" mode it picks the page to open for
+// everyone, when the side panel's framed page has moved to one it can't name.
 
 import type { PageEntry, PageList } from "@lkob/shared";
 import { FileQuestion, Link2, Search, Unlink, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { searchPages } from "../lib/match";
 import { describeOpenError, openPage, saveLink, type PickerMode } from "../lib/open";
+import { askToOpenForEveryone, openForEveryone } from "../lib/share";
 import { getPlayerLink, gmLinkFor, type PageLink } from "../lib/pageLinks";
 import { loadPageList, type Role } from "../lib/pageLists";
 import { PICKER_MODAL_ID } from "../platform/channels";
@@ -16,7 +18,8 @@ import { PageRow } from "../ui/PageRow";
 
 const params = new URLSearchParams(location.search);
 const itemId = params.get("item") ?? "";
-const mode: PickerMode = params.get("mode") === "link" ? "link" : "open";
+const modeParam = params.get("mode");
+const mode: PickerMode = modeParam === "link" || modeParam === "share" ? modeParam : "open";
 
 type Current = { link: PageLink; by: "gm" | "player" };
 
@@ -56,6 +59,12 @@ export function PickerApp({ platform }: { platform: Platform }) {
     setBusy(true);
     try {
       const link = { resourceId: page.id, name: page.name };
+      if (mode === "share") {
+        const share = role === "GM" ? openForEveryone : askToOpenForEveryone;
+        await share(platform, { projectId: list.projectId, resourceId: page.id, name: page.name });
+        close();
+        return;
+      }
       if (!gmLocked) await saveLink(platform, role, list.projectId, itemId, link);
       await openPage(platform, list, role, link);
       close();
@@ -87,13 +96,22 @@ export function PickerApp({ platform }: { platform: Platform }) {
 
   return (
     <div className="app">
-      <AppHeader title={mode === "link" ? "Link LK Page" : "Choose LK Page"} sub={list?.projectName ?? "LegendKeeper"}>
+      <AppHeader
+        title={mode === "link" ? "Link LK Page" : mode === "share" ? "Open for everyone" : "Choose LK Page"}
+        sub={list?.projectName ?? "LegendKeeper"}
+      >
         <IconButton label="Close" onClick={close}>
           <X />
         </IconButton>
       </AppHeader>
       <main className="app-body stack">
-        {current && (
+        {mode === "share" && (
+          <div className="small faint">
+            You moved to another page inside LegendKeeper's view, and LegendKeeper doesn't let the extension see which. Choose the page
+            to open for everyone.
+          </div>
+        )}
+        {current && mode !== "share" && (
           <div className="row linked-line">
             <Link2 size={14} aria-hidden />
             <span className="spacer small">
@@ -152,7 +170,7 @@ export function PickerApp({ platform }: { platform: Platform }) {
             </div>
           )}
           {list && !query.trim() && (
-            <Empty icon={<Search />} title="Find the token's page">
+            <Empty icon={<Search />} title={mode === "share" ? "Find the page" : "Find the token's page"}>
               Type part of a name, alias, tag or folder.
             </Empty>
           )}

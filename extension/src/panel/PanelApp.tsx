@@ -8,6 +8,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, EyeOff, House, PenLine, SquareArr
 import { useEffect, useRef, useState } from "react";
 import type { Role } from "../lib/pageLists";
 import { savePanelWidth } from "../lib/panelWidth";
+import { openPicker } from "../lib/open";
 import { askToOpenForEveryone, openForEveryone } from "../lib/share";
 import { publicPageUrl, tabUrl } from "../lib/urls";
 import { PANEL_POPOVER_ID } from "../platform/channels";
@@ -42,6 +43,8 @@ export function PanelApp({ platform }: { platform: Platform }) {
   const [view, setView] = useState<View>(requestedView);
   // Pages opened from mentions inside the API view, most recent last.
   const [trail, setTrail] = useState<{ resourceId: string; name: string }[]>([]);
+  // The framed public view moved to a page the panel can't name (it's another site).
+  const [frameAway, setFrameAway] = useState(false);
   useEffect(() => {
     void platform
       .getRole()
@@ -80,7 +83,7 @@ export function PanelApp({ platform }: { platform: Platform }) {
         </Empty>
       </main>
     );
-  } else body = <LkFrame />;
+  } else body = <LkFrame onAwayChange={setFrameAway} />;
 
   return (
     <div className="app">
@@ -113,6 +116,10 @@ export function PanelApp({ platform }: { platform: Platform }) {
                 : "Ask the GM to open this page for everyone"
           }
           onClick={() => {
+            if (effective === "public" && frameAway) {
+              void openPicker(platform, "", "", "share");
+              return;
+            }
             const page = { projectId, resourceId: current.resourceId, name: current.name };
             const share = role === "GM" ? openForEveryone : askToOpenForEveryone;
             void share(platform, page).catch((err: unknown) => platform.notify(`Couldn't share the page: ${String(err)}`, "ERROR"));
@@ -202,11 +209,33 @@ function ResizeHandle({ platform }: { platform: Platform }) {
   );
 }
 
-/** The framed public view, with back, home and forward floating over LegendKeeper's top bar. */
-function LkFrame() {
+/**
+ * The framed public view, with back, home and forward floating over
+ * LegendKeeper's top bar. It reports whether the frame has left the page it
+ * opened on: the frame is another site, so which page it moved to is unknown.
+ */
+function LkFrame({ onAwayChange }: { onAwayChange: (away: boolean) => void }) {
   const home = publicPageUrl(projectId, resourceId);
   const frame = useRef<HTMLIFrameElement>(null);
   const [nav, setNav] = useState(INITIAL_FRAME_HISTORY);
+  // Per history entry the frame added (index = nav.pos): true where it is the home page.
+  const entries = useRef<boolean[]>([true]);
+  const lastLength = useRef(0);
+  const homePending = useRef(false);
+
+  useEffect(() => {
+    if (nav.base === null) return;
+    if (nav.length !== lastLength.current) {
+      // A new entry: the home button's, or a link followed inside the frame.
+      if (lastLength.current !== 0) {
+        entries.current = entries.current.slice(0, nav.pos);
+        entries.current[nav.pos] = homePending.current;
+        homePending.current = false;
+      }
+      lastLength.current = nav.length;
+    }
+    onAwayChange(entries.current[nav.pos] !== true);
+  }, [nav, onAwayChange]);
 
   // Navigations inside the frame don't notify the panel; history.length does change.
   useEffect(() => {
@@ -226,6 +255,7 @@ function LkFrame() {
   };
   // Reassigning src loads the page afresh, as a new entry after the current one.
   const goHome = () => {
+    homePending.current = true;
     if (frame.current) frame.current.src = home;
   };
 

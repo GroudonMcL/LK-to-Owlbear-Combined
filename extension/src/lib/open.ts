@@ -15,7 +15,8 @@ import { tokenLabel } from "./token";
 import { tabUrl } from "./urls";
 
 
-export type PickerMode = "open" | "link";
+/** "share": choose a page to open for everyone (the framed page moved somewhere the panel can't see). */
+export type PickerMode = "open" | "link" | "share";
 
 /** "Open LK Page": open the token's page, or the picker when it can't be decided. */
 export async function openForToken(platform: Platform, item: Item): Promise<void> {
