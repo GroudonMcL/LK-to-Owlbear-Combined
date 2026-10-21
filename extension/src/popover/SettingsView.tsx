@@ -11,6 +11,7 @@ import type { Platform } from "../platform/types";
 import { Banner, Button, Field, IconButton, Segmented } from "../ui/components";
 import { PageListStatusLine } from "../ui/PageListStatusLine";
 import { OpenModeField } from "./OpenModeField";
+import { SceneLinksField } from "./SceneLinksField";
 import { useSceneLinks } from "./useSceneLinks";
 
 type Connection =
@@ -213,6 +214,7 @@ export function SettingsView({ platform, onDone }: { platform: Platform; onDone:
         <section className="card stack">
           <div className="eyebrow">Opening pages</div>
           <OpenModeField isPublic={selected?.isPublic} />
+          <SceneLinksField role="GM" />
         </section>
 
         <section className="card stack">

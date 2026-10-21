@@ -1466,3 +1466,10 @@ a.btn {
   z-index: 29;
   cursor: ew-resize;
 }
+
+/* Header buttons that shrink to their icon in a narrow panel, leaving room for the title. */
+@media (max-width: 520px) {
+  .btn-collapse .btn-label {
+    display: none;
+  }
+}

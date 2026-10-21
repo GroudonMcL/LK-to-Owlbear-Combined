@@ -11,9 +11,8 @@ import { PlayerView } from "./PlayerView";
 import { matchSummary, SceneTextView } from "./SceneTextView";
 import { SearchView, type PageRef } from "./SearchView";
 import { SettingsView } from "./SettingsView";
-import { TestSettingsView } from "./TestSettingsView";
 
-type View = { kind: "search" } | { kind: "scene" } | { kind: "test" } | { kind: "page"; page: PageRef } | { kind: "settings" };
+type View = { kind: "search" } | { kind: "scene" } | { kind: "page"; page: PageRef } | { kind: "settings" };
 
 export function PopoverApp({ platform }: { platform: Platform }) {
   useTheme(platform);
@@ -87,24 +86,16 @@ export function PopoverApp({ platform }: { platform: Platform }) {
       <Segmented
         label="Show"
         fill
-        value={view.kind === "scene" || view.kind === "test" ? view.kind : "search"}
+        value={view.kind === "scene" ? "scene" : "search"}
         onChange={(kind) => setView({ kind })}
         options={[
           { value: "search", label: "Search" },
           { value: "scene", label: count ? `In this scene (${count})` : "In this scene" },
-          { value: "test", label: "Test settings" },
         ]}
       />
     );
     body =
-      view.kind === "test" ? (
-        <div className="stack" style={{ height: "100%" }}>
-          {tabs}
-          <div className="scroll" style={{ flex: 1, minHeight: 0 }}>
-            <TestSettingsView role="GM" />
-          </div>
-        </div>
-      ) : view.kind === "scene" ? (
+      view.kind === "scene" ? (
         <div className="stack" style={{ height: "100%" }}>
           {tabs}
           <div className="scroll" style={{ flex: 1, minHeight: 0 }}>

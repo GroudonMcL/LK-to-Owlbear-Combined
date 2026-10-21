@@ -22,6 +22,7 @@ export default defineConfig({
         panel: resolve(__dirname, "panel.html"),
         textmenu: resolve(__dirname, "textmenu.html"),
         tab: resolve(__dirname, "tab.html"),
+        share: resolve(__dirname, "share.html"),
       },
     },
   },

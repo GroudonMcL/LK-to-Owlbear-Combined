@@ -181,6 +181,12 @@ export const mockPlatform: Platform = {
   async sendLocal(channel, data) {
     write(BUS, { channel, data, at: Date.now() });
   },
+  async sendToRoom(channel, data) {
+    log(`Sent to the room on ${channel}: ${JSON.stringify(data)}`);
+  },
+  async playerName() {
+    return "Mock GM";
+  },
   onLocal(channel, cb) {
     return onKey(BUS, () => {
       const msg = read<{ channel: string; data: unknown } | null>(BUS, null);

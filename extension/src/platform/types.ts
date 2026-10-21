@@ -89,6 +89,10 @@ export interface Platform {
   buildTokenItem(spec: TokenItemSpec): Item;
   startPlacement(request: PlacementRequest): Promise<void>;
   sendLocal(channel: string, data: unknown): Promise<void>;
+  /** Sends to this extension in every other browser in the room. */
+  sendToRoom(channel: string, data: unknown): Promise<void>;
+  /** This person's name in the room. */
+  playerName(): Promise<string>;
   onLocal(channel: string, cb: (data: unknown) => void): () => void;
   getTheme(): Promise<ThemeInfo>;
   onThemeChange(cb: (theme: ThemeInfo) => void): () => void;
