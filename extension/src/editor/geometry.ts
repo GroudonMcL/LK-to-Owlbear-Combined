@@ -1,7 +1,8 @@
 // Crop maths: where the image sits inside the frame, how far it may move and
 // how small it may get before an empty corner would show.
 
-import { DEFAULT_TRANSFORM, ZOOM_MAX, type ImageTransform, type TokenStyle } from "./model";
+import { IMAGE_FRAME_CLIP, isImageFrame } from "./imageFrames";
+import { DEFAULT_TRANSFORM, effectiveShape, ZOOM_MAX, type ImageTransform, type TokenStyle } from "./model";
 import { boundingBox, shapePolygon, type Point } from "./shapes";
 
 export interface Insets {
@@ -24,13 +25,18 @@ export function computeInsets(style: TokenStyle): Insets {
     frameOuter,
     frameInner,
     backing: frameOuter + border / 2,
-    image: style.padding > 0 ? frameInner + style.padding : frameOuter + border / 2,
+    image:
+      style.padding > 0
+        ? frameInner + style.padding
+        : isImageFrame(style.frame)
+          ? 1 - (1 - frameOuter) * IMAGE_FRAME_CLIP
+          : frameOuter + border / 2,
   };
 }
 
 /** The polygon the image must cover, for a token of half-size 1. */
 export function imageClipPolygon(style: TokenStyle): Point[] {
-  return shapePolygon(style.shape, 1, computeInsets(style).image);
+  return shapePolygon(effectiveShape(style), 1, computeInsets(style).image);
 }
 
 /** Scale (image px → R units) at which the image exactly covers the clip region's bounding box. */

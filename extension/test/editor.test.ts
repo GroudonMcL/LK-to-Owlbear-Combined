@@ -1,4 +1,8 @@
-import { createCanvas, type Canvas } from "@napi-rs/canvas";
+import { createCanvas, loadImage, type Canvas } from "@napi-rs/canvas";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { setFrameImage } from "../src/editor/imageFrames";
+import { toHex, toHsl } from "../src/editor/color";
 import { describe, expect, it } from "vitest";
 import { applyAdjustments, removeFlatBackground } from "../src/editor/adjust";
 import type { Ctx } from "../src/editor/frames";
@@ -257,5 +261,50 @@ describe("adjustments", () => {
     expect(alpha(0, 0)).toBe(0);
     expect(alpha(2, 2)).toBe(255); // enclosed white survives
     expect(alpha(1, 1)).toBe(255); // subject untouched
+  });
+});
+
+describe("artwork frames", () => {
+  it("draw the ring over the art with no gap, always as a circle", async () => {
+    const ring = await loadImage(readFileSync(path.join(__dirname, "../public/frames/stamped-colour.webp")));
+    setFrameImage("stampedColour", ring as unknown as CanvasImageSource);
+    const preset = FRAME_PRESETS.find((p) => p.id === "stamped-colour")!;
+    // Square chosen, but the frame is a circle: the corners stay clear.
+    const style: TokenStyle = { ...DEFAULT_STYLE, ...preset.style, shape: "square", backingOpacity: 0 };
+    const img = render(256, solidSource(100, 100, "#00ff00"), style, DEFAULT_TRANSFORM);
+    expect(alphaAt(img, 2, 2)).toBe(0);
+    expect(rgbAt(img, 128, 128)).toEqual([0, 255, 0]);
+    // Every pixel from the centre out to the ring is covered, in all four directions.
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      for (let r = 0; r <= 120; r++) expect(alphaAt(img, 128 + dx * r, 128 + dy * r)).toBe(255);
+    }
+  });
+});
+
+describe("Stamped (drawn)", () => {
+  const warmPixels = (colour: string) => {
+    const style: TokenStyle = { ...DEFAULT_STYLE, ...FRAME_PRESETS[0].style, frameColor: colour, backingColor: "#808080", backingOpacity: 1 };
+    const img = render(256, null, style, DEFAULT_TRANSFORM);
+    let warm = 0;
+    for (let y = 0; y < 256; y++) {
+      for (let x = 0; x < 256; x++) {
+        const d = Math.hypot(x - 127.5, y - 127.5) / 128;
+        if (d < 0.84 || d > 0.96 || alphaAt(img, x, y) < 250) continue;
+        const [r, g, b] = rgbAt(img, x, y);
+        const { h, s, l } = toHsl(toHex({ r, g, b }));
+        if ((h < 50 || h > 340) && s > 0.35 && l > 0.12 && l < 0.9) warm++;
+      }
+    }
+    return warm;
+  };
+
+  it("is the first frame, and the default", () => {
+    expect(FRAME_PRESETS[0].id).toBe("stamped");
+    expect(DEFAULT_STYLE.frame).toBe("stamped");
+  });
+
+  it("recolours completely: a blue ring keeps no orange or red", () => {
+    expect(warmPixels("#d7671f")).toBeGreaterThan(1000); // the original is mostly warm
+    expect(warmPixels("#2f6bd7")).toBe(0);
   });
 });

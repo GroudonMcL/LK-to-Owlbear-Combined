@@ -39,3 +39,51 @@ export function rgba(hex: string, alpha: number): string {
 export function isValidHex(value: string): boolean {
   return /^#[0-9a-f]{6}$/i.test(value);
 }
+
+export interface Hsl {
+  /** 0–360 */
+  h: number;
+  /** 0–1 */
+  s: number;
+  /** 0–1 */
+  l: number;
+}
+
+export function toHsl(hex: string): Hsl {
+  const { r, g, b } = parseHex(hex);
+  const R = r / 255;
+  const G = g / 255;
+  const B = b / 255;
+  const max = Math.max(R, G, B);
+  const min = Math.min(R, G, B);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  const h = max === R ? (G - B) / d + (G < B ? 6 : 0) : max === G ? (B - R) / d + 2 : (R - G) / d + 4;
+  return { h: h * 60, s, l };
+}
+
+export function fromHsl({ h, s, l }: Hsl): string {
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return toHex({ r: f(0) * 255, g: f(8) * 255, b: f(4) * 255 });
+}
+
+/**
+ * Moves a colour from a palette designed around `from` to the same place in a
+ * palette around `to`: hue turned by the difference, saturation scaled, and
+ * lightness shifted part of the way, so the palette keeps its contrast.
+ */
+export function recolour(hex: string, from: string, to: string): string {
+  if (from.toLowerCase() === to.toLowerCase()) return hex;
+  const a = toHsl(from);
+  const b = toHsl(to);
+  const c = toHsl(hex);
+  return fromHsl({
+    h: (c.h + b.h - a.h + 360) % 360,
+    s: Math.min(1, a.s > 0 ? (c.s * b.s) / a.s : b.s),
+    l: Math.min(1, Math.max(0, c.l + (b.l - a.l) * 0.6)),
+  });
+}

@@ -4,7 +4,7 @@
 import { parseHex } from "./color";
 import { drawFrame, tracePolygon, type Ctx } from "./frames";
 import { baseScale, computeInsets } from "./geometry";
-import type { ImageTransform, TokenStyle } from "./model";
+import { effectiveShape, type ImageTransform, type TokenStyle } from "./model";
 import { shapePolygon } from "./shapes";
 
 export interface RenderSource {
@@ -23,13 +23,14 @@ export function renderToken(
 ): void {
   const R = size / 2;
   const insets = computeInsets(style);
+  const shape = effectiveShape(style);
 
   ctx.save();
   ctx.clearRect(0, 0, size, size);
   ctx.translate(R, R);
 
   // Backing: shows through padding, transparent art and letterboxed fits.
-  const backing = shapePolygon(style.shape, R, insets.backing * R);
+  const backing = shapePolygon(shape, R, insets.backing * R);
   if (style.backingOpacity > 0 && backing.length) {
     const { r, g, b } = parseHex(style.backingColor);
     ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${Math.min(1, style.backingOpacity)})`;
@@ -37,7 +38,7 @@ export function renderToken(
     ctx.fill();
   }
 
-  const clip = shapePolygon(style.shape, R, insets.image * R);
+  const clip = shapePolygon(shape, R, insets.image * R);
   if (source && clip.length) {
     ctx.save();
     tracePolygon(ctx, clip);
@@ -56,7 +57,7 @@ export function renderToken(
 
   ctx.globalAlpha = Math.min(1, Math.max(0, style.frameOpacity));
   drawFrame(ctx, style.frame, {
-    shape: style.shape,
+    shape,
     R,
     outer: insets.frameOuter * R,
     inner: insets.frameInner * R,
