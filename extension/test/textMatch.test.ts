@@ -133,3 +133,19 @@ describe("PageMatcher.matchItems", () => {
     ]);
   });
 });
+
+describe("findRanges", () => {
+  it("finds every mention with its position, longest phrase first", () => {
+    const text = "The Red Dragon met a dragon in Millbrook.";
+    const ranges = matcher.findRanges(text);
+    expect(ranges.map((r) => [text.slice(r.start, r.end), r.pages.map((p) => p.id)])).toEqual([
+      ["Red Dragon", ["red"]],
+      ["dragon", ["dragon"]],
+      ["Millbrook", ["vil"]],
+    ]);
+  });
+
+  it("keeps every page of an ambiguous name", () => {
+    expect(matcher.findRanges("Twins")[0].pages.map((p) => p.id)).toEqual(["twa", "twb"]);
+  });
+});

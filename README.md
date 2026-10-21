@@ -96,11 +96,31 @@ the players' popover) show its state, e.g. *D&D - Greyhawk: loading pages…* an
     them, and get only LegendKeeper's public view. In a private project, their links
     explain that pages can't be shown to players.
 
+### Links on the map (testing)
+
+The **Test settings** tab in the toolbar popover (players: a section at the bottom of
+theirs) marks page names right in the notes and Text items. It is on by default; each
+person can turn it off or try the options, which are kept in their own browser.
+
+- **Underline:** *Drawn over* draws lines under the words, only in that person's
+  browser, for the pages they can open. *Real underline* (GM only) writes the underline
+  into the note's own text so everyone sees it, for public pages only; switching away
+  takes those underlines off again and leaves ones you typed alone. *None* draws nothing.
+- **Click a linked word** (option B): an invisible box sits over each linked word.
+  Clicking it opens the page as the In this scene tab would.
+- **Book badge** (option C): a book on the corner of each note or text that names pages.
+  It opens the page, or a list when the text names several.
+- **Line-up:** Owlbear doesn't say where it draws each word, so the extension works out
+  the layout from the font, size, padding, alignment and wrap width. **Show click areas**
+  shows what it worked out, and the sliders (text size, heading sizes, list indent,
+  paragraph gap, underline height) calibrate it. Rotated notes and text get the badge only.
+
 ### Token importer (GM)
 
 - **Search & images.** Search your LegendKeeper project, open a page, and see every image
   on it: sidebar images and image blocks (including those inside infoboxes, layouts,
-  tables and secrets), plus the page image and the banner. **Open page** shows the page
+  tables and secrets) on every page tab, images on board tabs, plus the page image and
+  the banner. **Open page** shows the page
   itself.
 - **Linked tokens, no accidental duplicates.** Each token remembers its page by id.
   Opening a page that already has a token offers **Use existing**, **Create another** or

@@ -21,6 +21,13 @@ export interface TextPageMatch {
   phrase: string;
 }
 
+/** One mention in a text: `text.slice(start, end)` names `pages` (usually one). */
+export interface TextRange {
+  start: number;
+  end: number;
+  pages: PageEntry[];
+}
+
 export interface ItemTextMatches {
   source: TextSource;
   /** Each page once, in the order the text first mentions it. */
@@ -54,7 +61,7 @@ export function phraseKey(name: string): string {
 }
 
 /** Text of Slate nodes (Owlbear's rich text), one line per block. */
-function richText(nodes: unknown, depth = 0): string {
+export function richText(nodes: unknown, depth = 0): string {
   if (!Array.isArray(nodes) || depth > 32) return "";
   const parts: string[] = [];
   for (const node of nodes) {
@@ -129,6 +136,31 @@ export class PageMatcher {
     if (this.memo.size > 500) this.memo.clear();
     this.memo.set(text, result);
     return result;
+  }
+
+  /**
+   * Every mention in `text`, with its position, for drawing links over the
+   * words. Positions index `text`; text whose NFKC form has another length
+   * (rare ligatures and the like) finds nothing rather than misplaced ranges.
+   */
+  findRanges(text: string): TextRange[] {
+    const normalized = text.normalize("NFKC");
+    if (normalized.length !== text.length) return [];
+    const out: TextRange[] = [];
+    const ws = words(text);
+    for (let i = 0; i < ws.length; ) {
+      let advanced = false;
+      for (let len = Math.min(this.maxWords, ws.length - i); len >= 1; len--) {
+        const pages = this.byPhrase.get(ws.slice(i, i + len).map((w) => w.norm).join(" "));
+        if (!pages) continue;
+        out.push({ start: ws[i].start, end: ws[i + len - 1].end, pages });
+        i += len;
+        advanced = true;
+        break;
+      }
+      if (!advanced) i += 1;
+    }
+    return out;
   }
 
   /** Every note and Text item that mentions at least one page, in scene order. */
