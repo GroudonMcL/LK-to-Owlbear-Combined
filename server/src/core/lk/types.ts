@@ -77,6 +77,21 @@ export interface LkDocumentBlocks {
   blocks: LkNode[];
 }
 
+/** A tldraw shape or asset record on a board, as getBoardContent returns it. */
+export interface LkBoardRecord {
+  id: string;
+  type: string;
+  x?: number;
+  y?: number;
+  parentId?: string;
+  props?: Record<string, unknown>;
+}
+
+export interface LkBoardContent {
+  shapes: LkBoardRecord[];
+  assets: LkBoardRecord[];
+}
+
 export interface LkErrorBody {
   message?: string;
   code?: string;

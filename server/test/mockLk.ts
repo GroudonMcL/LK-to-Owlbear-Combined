@@ -191,6 +191,21 @@ export function buildFixtures(assetBase: string) {
       documents: [{ id: "v1", name: "Main", type: "page", rank: "a0", isHidden: false }],
       properties: [],
     },
+    ogre: {
+      id: "ogre",
+      name: "Ogre",
+      tags: ["monster"],
+      aliases: [],
+      rank: "a3",
+      isHidden: false,
+      permissions: {},
+      documents: [
+        { id: "o1", name: "Main", type: "page", rank: "a0", isHidden: false },
+        { id: "o2", name: "Gallery", type: "board", rank: "a1", isHidden: false },
+        { id: "o3", name: "Deleted board", type: "board", rank: "a2", isHidden: false, deletedAt: "2026-01-01T00:00:00Z" },
+      ],
+      properties: [],
+    },
     // Folders and a hidden branch, for page lists.
     bestiary: folder("bestiary", "Bestiary", null, false, "a4"),
     cabal: folder("cabal", "The Cabal", null, true, "a5"),
@@ -261,9 +276,32 @@ export function buildFixtures(assetBase: string) {
     ],
     "village/v1": [{ id: "v", kind: "paragraph", content: runs("A large village by the river.") }],
     "missingimg/m1": [],
+    "ogre/o1": [{ id: "o", kind: "image", url: `${assetBase}/assets/ogre-main.png`, title: "Ogre" }],
   };
 
-  return { resources, blocks };
+  // Board content (tldraw records), by "resource/document".
+  const boards: Record<string, unknown> = {
+    "ogre/o2": {
+      shapes: [
+        { id: "shape:frame", type: "frame", x: 0, y: 500, parentId: "page:1", props: {} },
+        // Inside the frame: really at y = 520, below the shape at y = 100.
+        { id: "shape:low", type: "image", x: 10, y: 20, parentId: "shape:frame", props: { assetId: "asset:low" } },
+        { id: "shape:high", type: "image", x: 300, y: 100, parentId: "page:1", props: { assetId: "asset:high" } },
+        { id: "shape:text", type: "text", x: 0, y: 0, parentId: "page:1", props: { text: "Notes" } },
+      ],
+      assets: [
+        { id: "asset:low", type: "image", props: { src: `${assetBase}/assets/ogre-club.png`, name: "club.png" } },
+        { id: "asset:high", type: "image", props: { src: `${assetBase}/assets/ogre-face.png`, name: "face.png" } },
+        // On the board but not shown by any shape.
+        { id: "asset:spare", type: "image", props: { src: `${assetBase}/assets/ogre-spare.png`, name: "" } },
+        { id: "asset:link", type: "bookmark", props: { src: "https://example.com" } },
+        // Already on the page tab: listed once.
+        { id: "asset:dup", type: "image", props: { src: `${assetBase}/assets/ogre-main.png` } },
+      ],
+    },
+  };
+
+  return { resources, blocks, boards };
 }
 
 export async function startMockLk(listenPort = 0): Promise<MockLk> {
@@ -362,12 +400,17 @@ export async function startMockLk(listenPort = 0): Promise<MockLk> {
       return json(200, { data: data.slice(0, limit), hasMore: false, nextCursor: null });
     }
 
-    const resMatch = /^\/resources\/([^/]+)(?:\/docs\/([^/]+)\/blocks)?$/.exec(rest);
+    const resMatch = /^\/resources\/([^/]+)(?:\/docs\/([^/]+)\/(blocks|board))?$/.exec(rest);
     if (resMatch) {
-      const [, rid, docId] = resMatch;
+      const [, rid, docId, part] = resMatch;
       const resource = fixtures.resources[rid];
       if (!resource) return json(404, { message: "Not found", code: "NOT_FOUND", requestId: "r404" });
       if (!docId) return json(200, resource);
+      if (part === "board") {
+        const board = fixtures.boards[`${rid}/${docId}`];
+        if (!board) return json(400, { message: "Not a board", code: "KIND_MISMATCH", requestId: "r400" });
+        return json(200, { schema: {}, pages: [], bindings: [], version: "v1", ...(board as object) });
+      }
       const content = fixtures.blocks[`${rid}/${docId}`];
       if (!content) return json(500, { message: "Internal", code: "INTERNAL", requestId: "r500" });
       return json(200, { id: docId, version: "v1", schema: 1, text: "", blocks: content });

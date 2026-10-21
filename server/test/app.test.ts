@@ -220,6 +220,18 @@ describe("page details", () => {
     expect(lk.requests).not.toContain(`GET /api/v3/projects/${PROJECT_ID}/resources/goblin/docs/doc2/blocks`);
   });
 
+  it("includes images from board tabs", async () => {
+    const res = await api(`/api/projects/${PROJECT_ID}/pages/ogre?fresh=1`);
+    expect(res.status).toBe(200);
+    const page = await res.json();
+    expect(page.images.map((i: { source: string; label: string }) => `${i.source}:${i.label}`)).toEqual([
+      "block:Ogre", "board:Gallery · image 1", "board:Gallery · image 2", "board:Gallery · image 3",
+    ]);
+    expect(page.warnings).toEqual([]);
+    // A deleted board is not read.
+    expect(lk.requests).not.toContain(`GET /api/v3/projects/${PROJECT_ID}/resources/ogre/docs/o3/board`);
+  });
+
   it("maps a LegendKeeper 404 to PAGE_NOT_FOUND", async () => {
     const res = await api(`/api/projects/${PROJECT_ID}/pages/nope`);
     expect(res.status).toBe(404);

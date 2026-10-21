@@ -6,7 +6,7 @@ import {
   type TextLineCandidate,
 } from "@lkob/shared";
 import { sha256Hex } from "../tokenStore.js";
-import type { LkDocument, LkNode, LkResource } from "./types.js";
+import type { LkBoardContent, LkBoardRecord, LkDocument, LkNode, LkResource } from "./types.js";
 
 export interface ExtractedImage extends PageImage {
   /** Upstream URL; stays on the server. */
@@ -17,6 +17,8 @@ export interface ExtractInput {
   resource: LkResource;
   /** Page documents in display order; `blocks` is null when the document could not be read. */
   documents: { doc: LkDocument; blocks: LkNode[] | null }[];
+  /** Board documents in display order; `content` is null when the board could not be read. */
+  boards?: { doc: LkDocument; content: LkBoardContent | null }[];
 }
 
 export interface ExtractResult {
@@ -168,10 +170,56 @@ function walk(node: unknown, ctx: WalkContext, depth: number): void {
   if (Array.isArray(n.children)) for (const child of n.children) walk(child, ctx, depth + 1);
 }
 
+function num(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * A board's images: image shapes in reading order (top to bottom, then left to
+ * right), then any image assets no shape shows.
+ */
+function addBoardImages(collector: Collector, doc: LkDocument, content: LkBoardContent): void {
+  const shapes = Array.isArray(content.shapes) ? content.shapes : [];
+  const assets = new Map<string, LkBoardRecord>();
+  for (const asset of Array.isArray(content.assets) ? content.assets : []) {
+    if (asset && asset.type === "image" && typeof asset.id === "string") assets.set(asset.id, asset);
+  }
+  const byId = new Map(shapes.filter((s) => s && typeof s.id === "string").map((s) => [s.id, s]));
+  // Shape positions are relative to their frame or group; add the parents' offsets.
+  const absolute = (shape: LkBoardRecord) => {
+    let x = num(shape.x);
+    let y = num(shape.y);
+    let parent = typeof shape.parentId === "string" ? byId.get(shape.parentId) : undefined;
+    for (let depth = 0; parent && depth < MAX_DEPTH; depth++) {
+      x += num(parent.x);
+      y += num(parent.y);
+      parent = typeof parent.parentId === "string" ? byId.get(parent.parentId) : undefined;
+    }
+    return { x, y };
+  };
+  const placed = shapes
+    .filter((s) => s?.type === "image" && typeof s.props?.assetId === "string" && assets.has(s.props.assetId as string))
+    .map((s) => ({ assetId: s.props!.assetId as string, ...absolute(s) }))
+    .sort((a, b) => a.y - b.y || a.x - b.x);
+  const order = [...new Set([...placed.map((p) => p.assetId), ...assets.keys()])];
+  let n = 0;
+  for (const assetId of order) {
+    const props = assets.get(assetId)?.props ?? {};
+    n += 1;
+    const name = typeof props.name === "string" ? props.name.trim() : "";
+    collector.addImage(props.src, {
+      source: "board",
+      label: `${doc.name} · image ${n}`,
+      ...(name ? { alt: name } : {}),
+      documentName: doc.name,
+    });
+  }
+}
+
 /**
  * Pulls the images, key/value rows and text lines out of a page, and detects
  * the creature size. Images come in the order a reader meets them: sidebar
- * images, then document images, then the page image and banner.
+ * images, then document images, then board images, then the page image and banner.
  */
 export async function extractPage(input: ExtractInput): Promise<ExtractResult> {
   const collector = new Collector();
@@ -187,6 +235,10 @@ export async function extractPage(input: ExtractInput): Promise<ExtractResult> {
     for (const block of blocks) {
       walk(block, { collector, documentName: doc.name, container: "Document", imageCounter: docCounter }, 0);
     }
+  }
+
+  for (const { doc, content } of input.boards ?? []) {
+    if (content) addBoardImages(collector, doc, content);
   }
 
   collector.addImage(input.resource.imageUrl, { source: "resource", label: "Page image" });
