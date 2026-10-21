@@ -1,12 +1,15 @@
 // Cloudflare Worker entry: one deployment serves the extension's static files
 // (Workers Static Assets), the API under /api, and hosted tokens under /t.
-// Nothing runs on the GM's computer, and it holds no LegendKeeper key: the
-// extension sends the GM's key with each request.
+// Nothing runs on the GM's computer. The LegendKeeper API keys and the
+// extension's access password are Worker secrets (LK_API_KEYS,
+// LKOB_ACCESS_TOKENS), set by the deploy workflow from repository secrets.
+// Built page lists are kept in the same KV namespace as tokens.
 
 import { ConfigError, loadConfig, type Env as ConfigEnv } from "./core/config.js";
 import { HttpError } from "./core/errors.js";
 import { createHandler } from "./core/handler.js";
 import { createFetchImageFetcher } from "./core/imageFetch.js";
+import { MemoryPageListStore, type PageListStore } from "./core/pageListStore.js";
 import { PageService, ProjectResolver } from "./core/services.js";
 import {
   mimeForFile,
@@ -19,10 +22,11 @@ import {
   type TokenStore,
 } from "./core/tokenStore.js";
 
-/** The parts of Workers KV this store uses. */
+/** The parts of Workers KV these stores use. */
 export interface KvLike {
+  get(key: string, options: { type: "text" }): Promise<string | null>;
   getWithMetadata<M>(key: string, options: { type: "stream" }): Promise<{ value: ReadableStream<Uint8Array> | null; metadata: M | null }>;
-  put(key: string, value: ArrayBuffer | Uint8Array, options?: { metadata?: unknown }): Promise<void>;
+  put(key: string, value: string | ArrayBuffer | Uint8Array, options?: { metadata?: unknown; expirationTtl?: number }): Promise<void>;
   delete(key: string): Promise<void>;
 }
 
@@ -75,6 +79,23 @@ export class KvTokenStore implements TokenStore {
   }
 }
 
+/**
+ * Page lists in Workers KV, under "page-list…" keys (token files are named by
+ * their hash, so the two never meet). An updated list may take up to a
+ * minute to reach every Cloudflare location.
+ */
+export class KvPageListStore implements PageListStore {
+  constructor(private readonly kv: KvLike) {}
+
+  get(key: string): Promise<string | null> {
+    return this.kv.get(key, { type: "text" });
+  }
+
+  put(key: string, value: string, ttlSeconds?: number): Promise<void> {
+    return this.kv.put(key, value, ttlSeconds === undefined ? undefined : { expirationTtl: Math.max(60, ttlSeconds) });
+  }
+}
+
 function stringVars(env: WorkerEnv): ConfigEnv {
   const out: ConfigEnv = {};
   for (const [key, value] of Object.entries(env)) if (typeof value === "string") out[key] = value;
@@ -91,8 +112,10 @@ function apiFor(env: WorkerEnv): Handler {
   try {
     const config = loadConfig(stringVars(env));
     const projects = new ProjectResolver();
+    const pageLists = env.TOKENS ? new KvPageListStore(env.TOKENS) : new MemoryPageListStore();
     const pages = new PageService(projects, {
       lkBaseUrl: config.lkBaseUrl,
+      pageLists,
       maxSourceImageBytes: config.maxSourceImageBytes,
       assetHostAllowlist: config.assetHostAllowlist,
       allowInsecureAssetFetch: config.allowInsecureAssetFetch,

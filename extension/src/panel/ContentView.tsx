@@ -30,8 +30,8 @@ export function ContentView({
 }) {
   const settings = useSettings();
   const api = useMemo(
-    () => (settings.backendUrl && settings.apiKey ? new ApiClient(settings) : null),
-    [settings.backendUrl, settings.apiKey],
+    () => (settings.backendUrl && settings.accessToken ? new ApiClient(settings) : null),
+    [settings.backendUrl, settings.accessToken],
   );
   const [state, setState] = useState<{ kind: "loading" } | { kind: "ready"; content: PageContent } | { kind: "error"; message: string }>({
     kind: "loading",
@@ -52,7 +52,7 @@ export function ContentView({
   if (!api) {
     return (
       <Empty icon={<Lock />} title="Connect LegendKeeper first">
-        Open the extension from the toolbar and paste your API key in Settings.
+        Open the extension from the toolbar and enter the access password in Settings.
       </Empty>
     );
   }

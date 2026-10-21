@@ -9,8 +9,9 @@
 // Env:   CHROMIUM_PATH (optional), E2E_OUT (screenshot dir, default e2e/output)
 
 import { spawn } from "node:child_process";
-import { createReadStream, mkdirSync, statSync } from "node:fs";
+import { createReadStream, mkdirSync, mkdtempSync, statSync } from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
@@ -23,6 +24,7 @@ const HOST = "http://127.0.0.1:4800";
 const NS = "io.github.groudonmcl.lk-to-owlbear";
 const PIXEL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 const API_KEY = "lk_test_key_do_not_leak_0123456789";
+const PASSWORD = "goblin";
 const children = [];
 const failures = [];
 let passed = 0;
@@ -79,13 +81,17 @@ function serveHost() {
 
 async function main() {
   run("npx", ["tsx", "server/test/mockLkServer.ts"], { MOCK_LK_PORT: "8790", MOCK_LK_PUBLIC: "1" });
-  // No LegendKeeper secrets: the GM pastes the key into the extension.
+  // The LegendKeeper key and the access password, as the deploy stores them in the Worker.
   const vars = {
     LK_BASE_URL: "http://127.0.0.1:8790",
+    LK_API_KEYS: API_KEY,
+    LKOB_ACCESS_TOKENS: PASSWORD,
     LKOB_INSECURE_ASSET_FETCH: "1",
   };
   const varArgs = Object.entries(vars).flatMap(([k, v]) => ["--var", `${k}:${v}`]);
-  run("npx", ["wrangler", "dev", "--port", "8787", "--ip", "127.0.0.1", ...varArgs], {
+  // A fresh local KV namespace, so the page list starts unbuilt.
+  const kvState = mkdtempSync(path.join(os.tmpdir(), "lkob-e2e-kv-"));
+  run("npx", ["wrangler", "dev", "--port", "8787", "--ip", "127.0.0.1", "--persist-to", kvState, ...varArgs], {
     // Local test servers must not go through any outbound proxy.
     NO_PROXY: "127.0.0.1,localhost",
     no_proxy: "127.0.0.1,localhost",
@@ -140,24 +146,26 @@ async function main() {
   const pop = page.frameLocator("#popover");
 
   console.log("Connect, project, search, page, images");
-  await pop.getByLabel("LegendKeeper API key").waitFor();
+  await pop.getByLabel("Access password").waitFor();
   check("server URL is implicit (same-origin build)", (await pop.getByLabel("Server URL").isVisible()) === false);
-  await pop.getByLabel("LegendKeeper API key").fill("lk_wrong_key_0000000000");
+  await pop.getByLabel("Access password").fill("not-the-password");
   await pop.getByRole("button", { name: "Connect" }).click();
   await pop.getByText("Connection failed").waitFor();
-  check("a key LegendKeeper refuses is reported", (await pop.getByText("didn't accept your API key").count()) === 1);
-  await pop.getByLabel("LegendKeeper API key").fill(API_KEY);
+  check("a wrong password is reported", (await pop.getByText("didn't accept that access password").count()) === 1);
+  await pop.getByLabel("Access password").fill(PASSWORD);
   await pop.getByRole("button", { name: "Connect" }).click();
   await pop.getByRole("main").getByText("The Test Realm", { exact: true }).waitFor();
-  check("the key's project is selected automatically", true);
+  check("the server key's project is selected automatically", true);
   const extOrigin = () => page.frames().find((f) => f.url().startsWith(WORKER));
-  const savedKey = await extOrigin().evaluate(() => JSON.parse(localStorage.getItem("lkob.settings.v1") ?? "{}").apiKey);
-  check("the API key is kept in this browser's storage", savedKey === API_KEY);
+  const saved = await extOrigin().evaluate(() => JSON.parse(localStorage.getItem("lkob.settings.v1") ?? "{}"));
+  check("only the password is kept in this browser's storage", saved.accessToken === PASSWORD && !("apiKey" in saved));
   await pop.getByText("The Test Realm: 8 pages, updated just now").waitFor();
-  check("connecting loads the page list and says so", true);
+  check("with no list on the server yet, connecting builds it and says so", true);
   await pop.getByRole("button", { name: "Refresh page list" }).click();
   await pop.getByText("The Test Realm: 8 pages, updated just now").waitFor();
   check("then how many pages it has and when it was updated", true);
+  const storedList = await fetch(`${WORKER}/api/public/projects/proj_test01/page-list`);
+  check("the server keeps the public list for players", storedList.status === 200);
   await shot("01-settings-connected");
   await pop.getByRole("button", { name: "Done" }).click();
   await pop.getByLabel("Search LegendKeeper pages").fill("goblin");
@@ -482,6 +490,8 @@ async function main() {
   check("the popover follows the change", true);
   state = await host(() => window.host.state);
   check("the API key never reaches the room or scene", !JSON.stringify([state.roomMeta, state.sceneMeta, state.items]).includes(API_KEY));
+  const storage = await extOrigin().evaluate(() => JSON.stringify({ ...localStorage }));
+  check("the API key never reaches the browser", !storage.includes(API_KEY));
 
   console.log("Players");
   const linkedVillain = { ...plain("villain-token", "Mordrith", "Mordrith"), metadata: { [`${NS}/link`]: { v: 1, projectId: "proj_test01", resourceId: "villain", title: "Mordrith", linkedAt: "", importId: "" } } };

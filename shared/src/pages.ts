@@ -1,6 +1,7 @@
 // Page lists: every page of a project with just what token matching needs
 // (names, aliases, tags, folders). The GM's list comes from the Worker's API
 // key; players get the public list, fetched from LegendKeeper without a key.
+// The Worker builds and stores both, so nobody waits for them on joining.
 
 /** One LegendKeeper page (a "resource" in the API) in a page list. */
 export interface PageEntry {

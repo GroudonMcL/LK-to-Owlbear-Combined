@@ -11,7 +11,7 @@ import { linksForPlacedItems, loadAssetLinks } from "./lib/assetLinks";
 import { syncRoomIndex } from "./lib/existing";
 import { LINK_KEY, parseLink } from "./lib/links";
 import { describeOpenError, linkToken, openForToken } from "./lib/open";
-import { loadPageList, PAGE_LIST_STATUS_KEY, readStatus } from "./lib/pageLists";
+import { loadPageList, PAGE_LIST_STATUS_KEY, readStatus, recheckPageList } from "./lib/pageLists";
 import { publishProject } from "./lib/project";
 import { SCENE_LINK_SETTINGS_KEY } from "./lib/sceneLinkSettings";
 import { parseSharedPage, receiveSharedPage, showShareRequest } from "./lib/share";
@@ -19,6 +19,7 @@ import { loadSettings, requestNavigation, SETTINGS_STORAGE_KEY } from "./lib/set
 import { PageMatcher, type ItemTextMatches } from "./lib/textMatch";
 import { isToken, TOKEN_FILTER } from "./lib/token";
 import {
+  CH_PAGE_LIST_REBUILT,
   CH_PAGES_REFRESHED,
   CH_PLACE,
   CH_SHARE_OPEN,
@@ -196,7 +197,7 @@ async function cancelPlacement(reason: string): Promise<void> {
   await teardownTool();
   if (request.cleanupHash) {
     const settings = loadSettings();
-    if (settings.backendUrl && settings.apiKey) {
+    if (settings.backendUrl && settings.accessToken) {
       await new ApiClient(settings).deleteToken(request.cleanupHash).catch(() => undefined);
     }
   }
@@ -320,6 +321,17 @@ OBR.onReady(async () => {
   });
   // A new page list (shared through storage): match against it.
   OBR.broadcast.onMessage(CH_PAGES_REFRESHED, () => scheduleTextScan());
+  // The GM rebuilt the page lists on the server: fetch the new one. Cloudflare may take
+  // up to a minute to show it everywhere, so look again a little later too.
+  OBR.broadcast.onMessage(CH_PAGE_LIST_REBUILT, () => {
+    const recheck = () =>
+      void OBR.player
+        .getRole()
+        .then((role) => recheckPageList(obrPlatform, role))
+        .then(() => scheduleTextScan(), () => undefined);
+    recheck();
+    setTimeout(recheck, 65_000);
+  });
   // A player's page list depends on the project the GM records on the room.
   OBR.room.onMetadataChange(() => scheduleTextScan());
   OBR.broadcast.onMessage(CH_PLACE, (event) => void startPlacement(event.data as PlacementRequest));

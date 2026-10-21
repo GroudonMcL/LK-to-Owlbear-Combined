@@ -21,6 +21,8 @@ export const CH_PAGES_REFRESHED = `${NAMESPACE}/pages-refreshed`;
 /** Between browsers in the room: open a page for everyone, and a player asking the GM to. */
 export const CH_SHARE_OPEN = `${NAMESPACE}/share-open`;
 export const CH_SHARE_REQUEST = `${NAMESPACE}/share-request`;
+/** Between browsers in the room: the GM had the server rebuild the page lists. */
+export const CH_PAGE_LIST_REBUILT = `${NAMESPACE}/page-list-rebuilt`;
 
 /** Absolute URL of one of this extension's pages or assets. */
 export function extensionUrl(path: string, params?: Record<string, string>): string {

@@ -4,11 +4,12 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { buildPageList } from "@lkob/shared";
+import { buildPageList, type StoredPageList } from "@lkob/shared";
 import { loadConfig } from "../src/core/config.js";
 import { createHandler, VERSION } from "../src/core/handler.js";
 import { LkClient } from "../src/core/lk/client.js";
 import { imageIdFor } from "../src/core/lk/extract.js";
+import { MemoryPageListStore } from "../src/core/pageListStore.js";
 import { PageService, ProjectResolver } from "../src/core/services.js";
 import { toNodeListener } from "../src/node/adapter.js";
 import { FileTokenStore } from "../src/node/fileTokenStore.js";
@@ -21,19 +22,25 @@ let server: http.Server;
 let base = "";
 let tokenDir = "";
 let rateLimit = 1000;
+const PASSWORD = "goblin";
+const OTHER_PASSWORD = "a-second-password";
 
 /** In-memory stand-in for a Workers KV namespace. */
 export function fakeKv(): KvLike & { size: () => number } {
   const store = new Map<string, { value: Uint8Array; metadata: unknown }>();
   return {
+    async get(key: string) {
+      const hit = store.get(key);
+      return hit ? new TextDecoder().decode(hit.value) : null;
+    },
     async getWithMetadata(key: string) {
       const hit = store.get(key);
       return hit
         ? { value: new Response(hit.value).body as ReadableStream<Uint8Array>, metadata: hit.metadata as never }
         : { value: null, metadata: null };
     },
-    async put(key: string, value: ArrayBuffer | Uint8Array, options?: { metadata?: unknown }) {
-      store.set(key, { value: new Uint8Array(value), metadata: options?.metadata });
+    async put(key: string, value: string | ArrayBuffer | Uint8Array, options?: { metadata?: unknown }) {
+      store.set(key, { value: typeof value === "string" ? new TextEncoder().encode(value) : new Uint8Array(value), metadata: options?.metadata });
     },
     async delete(key: string) {
       store.delete(key);
@@ -48,6 +55,8 @@ type Runtime = (typeof RUNTIMES)[number];
 function envFor(options: { hosting?: boolean }) {
   return {
     LK_BASE_URL: lk.baseUrl,
+    LK_API_KEYS: `${API_KEY},${OTHER_API_KEY}`,
+    LKOB_ACCESS_TOKENS: `${PASSWORD},${OTHER_PASSWORD}`,
     LKOB_TOKEN_DIR: tokenDir,
     LKOB_TOKEN_HOSTING: options.hosting === false ? "off" : "on",
     LKOB_PUBLIC_URL: "https://tokens.example",
@@ -66,6 +75,7 @@ async function start(options: { hosting?: boolean } = {}) {
     const projects = new ProjectResolver();
     const pages = new PageService(projects, {
       lkBaseUrl: lk.baseUrl,
+      pageLists: new MemoryPageListStore(),
       listRequestsPerChunk: 2,
       maxSourceImageBytes: config.maxSourceImageBytes,
       assetHostAllowlist: null,
@@ -98,10 +108,10 @@ async function stop() {
   await new Promise<void>((r) => server.close(() => r()));
 }
 
-function api(pathname: string, init: RequestInit = {}, key = API_KEY) {
+function api(pathname: string, init: RequestInit = {}, password = PASSWORD) {
   return fetch(base + pathname, {
     ...init,
-    headers: { Authorization: `Bearer ${key}`, Origin: "https://ext.example", ...(init.headers ?? {}) },
+    headers: { Authorization: `Bearer ${password}`, Origin: "https://ext.example", ...(init.headers ?? {}) },
   });
 }
 
@@ -129,21 +139,19 @@ describe("auth and CORS", () => {
     expect(await res.json()).toEqual({ ok: true, version: VERSION, tokenHosting: true });
   });
 
-  it("asks for an API key without calling LegendKeeper", async () => {
+  it("asks for the access password without calling LegendKeeper", async () => {
     const missing = await fetch(`${base}/api/projects`);
     expect(missing.status).toBe(401);
     expect((await missing.json()).error.code).toBe("UNAUTHORIZED");
-    const junk = await fetch(`${base}/api/projects`, { headers: { Authorization: "Bearer nope" } });
-    expect(junk.status).toBe(401);
+    const wrong = await api("/api/projects", {}, "nope");
+    expect(wrong.status).toBe(401);
+    // A LegendKeeper key is not a password here.
+    expect((await api("/api/projects", {}, API_KEY)).status).toBe(401);
     expect(lk.requests).toEqual([]);
   });
 
-  it("passes LegendKeeper's verdict on a wrong key back to the extension", async () => {
-    const res = await api("/api/projects", {}, "lk_wrong_key_0000000000");
-    expect(res.status).toBe(502);
-    const body = await res.json();
-    expect(body.error.code).toBe("UPSTREAM_AUTH");
-    expect(body.error.message).toMatch(/didn't accept your API key/);
+  it("accepts any of several passwords", async () => {
+    expect((await api("/api/projects", {}, OTHER_PASSWORD)).status).toBe(200);
   });
 
   it("answers preflight for the allowed origin only", async () => {
@@ -157,11 +165,14 @@ describe("auth and CORS", () => {
 });
 
 describe("projects and search", () => {
-  it("names the project the key opens", async () => {
+  it("names the project each of the server's keys opens", async () => {
     const body = await (await api("/api/projects")).json();
-    expect(body).toEqual({ projects: [{ id: PROJECT_ID, name: "The Test Realm", isPublic: false }] });
-    const other = await (await api("/api/projects", {}, OTHER_API_KEY)).json();
-    expect(other).toEqual({ projects: [{ id: OTHER_PROJECT_ID, name: "Another World", isPublic: false }] });
+    expect(body).toEqual({
+      projects: [
+        { id: PROJECT_ID, name: "The Test Realm", isPublic: false },
+        { id: OTHER_PROJECT_ID, name: "Another World", isPublic: false },
+      ],
+    });
   });
 
   it("de-duplicates search hits and keeps the content match snippet", async () => {
@@ -182,23 +193,24 @@ describe("projects and search", () => {
     expect(lk.requests).toEqual([]);
   });
 
-  it("refuses projects the key doesn't open, without asking LegendKeeper", async () => {
+  it("refuses projects no key opens, without asking LegendKeeper", async () => {
     await api("/api/projects");
     lk.requests.length = 0;
-    const res = await api(`/api/projects/proj_other/search?q=x`);
-    expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("WRONG_PROJECT");
+    const res = await api(`/api/projects/proj_nobody/search?q=x`);
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("PROJECT_NOT_CONFIGURED");
     expect(lk.requests).toEqual([]);
   });
 
-  it("never answers one key from another key's cache", async () => {
-    expect((await api(`/api/projects/${PROJECT_ID}/pages/goblin`)).status).toBe(200);
-    expect((await api(`/api/projects/${PROJECT_ID}/resources`)).status).toBe(200);
-    for (const path of [`/api/projects/${PROJECT_ID}/pages/goblin`, `/api/projects/${PROJECT_ID}/resources`, `/api/projects/${PROJECT_ID}/pages/goblin/content`]) {
-      const res = await api(path, {}, OTHER_API_KEY);
-      expect(res.status).toBe(403);
-      expect((await res.json()).error.code).toBe("WRONG_PROJECT");
-    }
+  it("uses each project's own key", async () => {
+    await api("/api/projects");
+    lk.requests.length = 0;
+    lk.authorizedRequests.length = 0;
+    await api(`/api/projects/${OTHER_PROJECT_ID}/pages/goblin?fresh=1`);
+    await api(`/api/projects/${PROJECT_ID}/pages/goblin?fresh=1`);
+    expect(lk.authorizedRequests).toContain(`${OTHER_API_KEY} GET /api/v3/projects/${OTHER_PROJECT_ID}/resources/goblin`);
+    expect(lk.authorizedRequests).toContain(`${API_KEY} GET /api/v3/projects/${PROJECT_ID}/resources/goblin`);
+    expect(lk.authorizedRequests.filter((r) => r.startsWith(API_KEY)).every((r) => !r.includes(OTHER_PROJECT_ID))).toBe(true);
   });
 });
 
@@ -354,8 +366,8 @@ describe("token hosting", () => {
     expect(huge.status).toBe(400);
     const anon = await fetch(`${base}/api/tokens`, { method: "POST", body: makePng(64, 64) });
     expect(anon.status).toBe(401);
-    const badKey = await api("/api/tokens", { method: "POST", body: makePng(64, 64) }, "lk_wrong_key_0000000000");
-    expect(badKey.status).toBe(502);
+    const wrong = await api("/api/tokens", { method: "POST", body: makePng(64, 64) }, "nope");
+    expect(wrong.status).toBe(401);
   });
 
   it("only serves well-formed token file names", async () => {
@@ -374,83 +386,135 @@ describe("token hosting", () => {
   });
 });
 
-/** Follows a resource listing's cursors, as the extension does, and builds the page list. */
-async function collect(path: string, key: string | null, fresh = false) {
-  const resources = [];
-  let project = null;
+/** Builds a stored page list step by step, as the extension and the deploy do. */
+async function build(projectId: string, audience: "gm" | "public", buildId = `b${Math.random().toString(36).slice(2, 10)}`) {
   let cursor = "";
-  let chunks = 0;
-  for (;;) {
-    const q = new URLSearchParams({ cursor, ...(fresh ? { fresh: "1" } : {}) });
-    const res = key ? await api(`${path}?${q}`, {}, key) : await fetch(`${base}${path}?${q}`);
+  let steps = 0;
+  for (let part = 0; ; part++) {
+    const res = await api(`/api/projects/${projectId}/page-list/build`, {
+      method: "POST",
+      body: JSON.stringify({ audience, buildId, part, cursor }),
+      headers: { "Content-Type": "application/json" },
+    });
     expect(res.status).toBe(200);
-    const chunk = await res.json();
-    chunks++;
-    project = chunk.project;
-    resources.push(...chunk.resources);
-    if (!chunk.nextCursor) break;
-    cursor = chunk.nextCursor;
+    const step = await res.json();
+    steps++;
+    if (step.done) return { steps, ...step };
+    cursor = step.nextCursor;
   }
-  return { chunks, project, list: buildPageList(project, resources, key ? "gm" : "public") };
+}
+
+async function stored(path: string, password: string | null = PASSWORD): Promise<StoredPageList> {
+  const res = password ? await api(path, {}, password) : await fetch(base + path);
+  expect(res.status).toBe(200);
+  return res.json();
 }
 
 describe("page lists", () => {
-  it("gives the GM every page in chunks, hidden ones flagged, following LegendKeeper's cursor", async () => {
-    const { chunks, project, list } = await collect(`/api/projects/${PROJECT_ID}/resources`, API_KEY, true);
-    expect(project).toEqual({ id: PROJECT_ID, name: "The Test Realm", isPublic: false });
-    const byId = Object.fromEntries(list.pages.map((p) => [p.id, p]));
+  it("has no list before the first build", async () => {
+    await stop();
+    await start(); // a fresh server (and, for the worker, an empty KV namespace)
+    const res = await api(`/api/projects/${PROJECT_ID}/page-list`);
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("PAGE_LIST_NOT_BUILT");
+    const pub = await fetch(`${base}/api/public/projects/${PROJECT_ID}/page-list`);
+    expect(pub.status).toBe(404);
+    expect((await pub.json()).error.message).toMatch(/Refresh page list/);
+  });
+
+  it("builds the GM's list in steps, following LegendKeeper's cursor, and stores it for everyone", async () => {
+    const result = await build(PROJECT_ID, "gm");
+    if (runtime === "node") expect(result.steps).toBeGreaterThan(1); // two LegendKeeper calls per step here
+    lk.requests.length = 0;
+    const list = await stored(`/api/projects/${PROJECT_ID}/page-list`);
+    expect(lk.requests).toEqual([]); // served from storage
+    expect(list).toMatchObject({ project: { id: PROJECT_ID, name: "The Test Realm", isPublic: false }, audience: "gm", truncated: false });
+    expect(list.resources).toHaveLength(result.total);
+    const pages = buildPageList(list.project, list.resources, "gm");
+    const byId = Object.fromEntries(pages.pages.map((p) => [p.id, p]));
     expect(byId.goblin).toEqual({ id: "goblin", name: "Goblin Boss", aliases: ["Boss"], tags: ["monster", "goblinoid"], path: ["Bestiary"], hidden: false, iconColor: null });
     expect(byId.villain).toMatchObject({ path: ["The Cabal"], hidden: true, aliases: ["The Hollow Queen"] });
     expect(byId.tpl).toBeUndefined(); // templates are not pages
-    // The mock serves two resources per request; the Node server here makes two requests per chunk.
-    expect(lk.requests.filter((r) => r.endsWith("/resources")).length).toBeGreaterThan(3);
-    if (runtime === "node") expect(chunks).toBeGreaterThan(1);
+    // Another password reads the same stored list.
+    expect((await stored(`/api/projects/${PROJECT_ID}/page-list`, OTHER_PASSWORD)).generatedAt).toBe(list.generatedAt);
   });
 
-  it("caches chunks unless asked for fresh ones", async () => {
-    await collect(`/api/projects/${PROJECT_ID}/resources`, API_KEY);
-    lk.requests.length = 0;
-    await collect(`/api/projects/${PROJECT_ID}/resources`, API_KEY);
-    expect(lk.requests).toEqual([]);
+  it("answers 204 when the browser already has the current list", async () => {
+    const { generatedAt } = await stored(`/api/projects/${PROJECT_ID}/page-list`);
+    const same = await api(`/api/projects/${PROJECT_ID}/page-list?since=${encodeURIComponent(generatedAt)}`);
+    expect(same.status).toBe(204);
+    const older = await api(`/api/projects/${PROJECT_ID}/page-list?since=2000-01-01T00:00:00.000Z`);
+    expect(older.status).toBe(200);
   });
 
-  it("requires an API key for the GM list, and rejects absurd cursors", async () => {
-    expect((await fetch(`${base}/api/projects/${PROJECT_ID}/resources`)).status).toBe(401);
-    expect((await api(`/api/projects/${PROJECT_ID}/resources?cursor=${"x".repeat(3000)}`)).status).toBe(400);
+  it("keeps the old list until a rebuild finishes", async () => {
+    const before = await stored(`/api/projects/${PROJECT_ID}/page-list`);
+    const first = await api(`/api/projects/${PROJECT_ID}/page-list/build`, {
+      method: "POST",
+      body: JSON.stringify({ audience: "gm", buildId: "halfway", part: 0, cursor: "" }),
+    });
+    expect(first.status).toBe(200);
+    // The Worker here lists the whole mock project in one step; the Node server needs several.
+    if (!(await first.json()).done) {
+      expect((await stored(`/api/projects/${PROJECT_ID}/page-list`)).generatedAt).toBe(before.generatedAt);
+    }
+    await new Promise((r) => setTimeout(r, 5));
+    await build(PROJECT_ID, "gm");
+    expect((await stored(`/api/projects/${PROJECT_ID}/page-list`)).generatedAt).not.toBe(before.generatedAt);
   });
 
-  it("gives players an empty public list for a private project, without any key", async () => {
-    const { project, list } = await collect(`/api/public/projects/${PROJECT_ID}/resources`, null);
-    expect(project.isPublic).toBe(false);
-    expect(list.pages).toEqual([]);
+  it("requires the password to read the GM list or build, and checks build steps", async () => {
+    expect((await fetch(`${base}/api/projects/${PROJECT_ID}/page-list`)).status).toBe(401);
+    expect((await fetch(`${base}/api/projects/${PROJECT_ID}/page-list/build`, { method: "POST", body: "{}" })).status).toBe(401);
+    const post = (body: unknown) => api(`/api/projects/${PROJECT_ID}/page-list/build`, { method: "POST", body: JSON.stringify(body) });
+    expect((await post({ audience: "everyone", buildId: "abcdef", part: 0, cursor: "" })).status).toBe(400);
+    expect((await post({ audience: "gm", buildId: "x", part: 0, cursor: "" })).status).toBe(400);
+    expect((await post({ audience: "gm", buildId: "abcdef", part: 1, cursor: "" })).status).toBe(400);
+    expect((await post({ audience: "gm", buildId: "abcdef", part: 0, cursor: "x".repeat(3000) })).status).toBe(400);
+    expect((await api(`/api/projects/${PROJECT_ID}/page-list/build`, { method: "POST", body: "not json" })).status).toBe(400);
+    // A later step whose earlier parts were never stored can't finish.
+    const orphan = await post({ audience: "gm", buildId: "orphan1", part: 3, cursor: "zzz" });
+    expect(orphan.status).toBe(409);
+  });
+
+  it("stores an empty public list for a private project, read without any password", async () => {
+    await build(PROJECT_ID, "public");
+    const list = await stored(`/api/public/projects/${PROJECT_ID}/page-list`, null);
+    expect(list.project.isPublic).toBe(false);
+    expect(list.resources).toEqual([]);
   });
 
   it("lists a public project's public pages keylessly, so hidden ones never appear", async () => {
     lk.setPublic(true);
-    await stop();
-    await start(); // a fresh server forgets the cached private answer
     try {
-      const { project, list } = await collect(`/api/public/projects/${PROJECT_ID}/resources`, null);
-      expect(project.isPublic).toBe(true);
-      const ids = list.pages.map((p) => p.id);
+      lk.requests.length = 0;
+      lk.authorizedRequests.length = 0;
+      await build(PROJECT_ID, "public");
+      // Every listing call for the public list went out without a key.
+      expect(lk.requests.filter((r) => r.endsWith("/resources")).length).toBeGreaterThan(0);
+      expect(lk.authorizedRequests.filter((r) => r.endsWith(`${PROJECT_ID}/resources`))).toEqual([]);
+      const list = await stored(`/api/public/projects/${PROJECT_ID}/page-list`, null);
+      expect(list.project.isPublic).toBe(true);
+      const pages = buildPageList(list.project, list.resources, "public");
+      const ids = pages.pages.map((p) => p.id);
       expect(ids).toContain("goblin");
       expect(ids).not.toContain("cabal");
       expect(ids).not.toContain("villain");
-      expect(list.pages.every((p) => !p.hidden)).toBe(true);
+      expect(pages.pages.every((p) => !p.hidden)).toBe(true);
     } finally {
       lk.setPublic(false);
-      await stop();
-      await start();
     }
   });
 
-  it("asks LegendKeeper anonymously, sending no key, and caches the answer", async () => {
-    const res = await fetch(`${base}/api/public/projects/proj_unknown/resources`, { headers: { Authorization: `Bearer ${API_KEY}` } });
-    expect(await res.json()).toMatchObject({ project: { isPublic: false }, resources: [], nextCursor: null });
-    lk.requests.length = 0;
-    await fetch(`${base}/api/public/projects/proj_unknown/resources`);
-    expect(lk.requests).toEqual([]);
-    expect((await fetch(`${base}/api/public/projects/bad%20id/resources`)).status).toBe(400);
+  it("serves no public list for projects it holds no key for", async () => {
+    const res = await fetch(`${base}/api/public/projects/proj_unknown/page-list`);
+    expect(res.status).toBe(404);
+    expect((await fetch(`${base}/api/public/projects/bad%20id/page-list`)).status).toBe(400);
+    const buildOther = await api(`/api/projects/proj_unknown/page-list/build`, {
+      method: "POST",
+      body: JSON.stringify({ audience: "public", buildId: "abcdef", part: 0, cursor: "" }),
+    });
+    expect(buildOther.status).toBe(404);
   });
 });
 
@@ -458,6 +522,8 @@ describe("secrets", () => {
   it("never echoes the LegendKeeper key in any response", async () => {
     const responses = await Promise.all([
       api("/api/projects"),
+      api("/api/projects", {}, "wrong"),
+      api(`/api/projects/${PROJECT_ID}/page-list`),
       api(`/api/projects/${PROJECT_ID}/search?q=goblin`),
       api(`/api/projects/${PROJECT_ID}/pages/goblin`),
       api(`/api/projects/${PROJECT_ID}/pages/nope`),
@@ -467,14 +533,14 @@ describe("secrets", () => {
 });
 
 describe("rate limiting", () => {
-  it("limits requests per API key", async () => {
+  it("limits requests per password", async () => {
     await stop();
     rateLimit = 3;
     await start();
     const statuses = [];
     for (let i = 0; i < 4; i++) statuses.push((await api("/api/projects")).status);
     expect(statuses).toEqual([200, 200, 200, 429]);
-    expect((await api("/api/projects", {}, OTHER_API_KEY)).status).toBe(200);
+    expect((await api("/api/projects", {}, OTHER_PASSWORD)).status).toBe(200);
     await stop();
     rateLimit = 1000;
     await start();

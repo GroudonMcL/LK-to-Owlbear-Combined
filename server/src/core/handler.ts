@@ -1,16 +1,15 @@
 // The HTTP API as a Web-standard (Request) => Response function, so the same
 // code runs in Cloudflare Workers and, through a thin adapter, in Node.
 
-import type { HealthResponse, TokenUploadResponse } from "@lkob/shared";
+import type { HealthResponse, PageListAudience, PageListBuildStep, TokenUploadResponse } from "@lkob/shared";
 import type { Config } from "./config.js";
 import { badRequest, HttpError } from "./errors.js";
 import { readDimensions, sniffImageMime } from "./imageSniff.js";
-import { TtlCache } from "./cache.js";
 import { LkClient } from "./lk/client.js";
-import type { Caller, PageService, ProjectResolver } from "./services.js";
+import { ServerKeys, type PageService, type ProjectResolver } from "./services.js";
 import { sha256Hex, StoreFullError, type TokenStore } from "./tokenStore.js";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 
 export interface HandlerDeps {
   config: Config;
@@ -23,13 +22,6 @@ export interface HandlerDeps {
 }
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-
-/** LegendKeeper's opaque list cursor, passed back as it came. */
-function listCursor(url: URL): string {
-  const cursor = url.searchParams.get("cursor") ?? "";
-  if (cursor.length > 2048) throw badRequest("Invalid cursor.");
-  return cursor;
-}
 const IMAGE_ID_PATTERN = /^[a-f0-9]{16,64}$/;
 const MAX_QUERY_LENGTH = 200;
 const MAX_TOKEN_DIMENSION = 2048;
@@ -54,8 +46,12 @@ class RateLimiter {
   }
 }
 
-/** LegendKeeper keys are opaque; this only rules out junk before calling LegendKeeper. */
-const API_KEY_PATTERN = /^[\x21-\x7e]{8,512}$/;
+/** Equal-length hex digests compared without an early exit. */
+function digestsEqual(a: string, b: string): boolean {
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  return diff === 0;
+}
 
 function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -64,10 +60,10 @@ function json(status: number, body: unknown, headers: Record<string, string> = {
   });
 }
 
-async function readBody(request: Request, maxBytes: number): Promise<Uint8Array> {
+async function readBody(request: Request, maxBytes: number, tooLarge = "Token image is too large."): Promise<Uint8Array> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) {
-    throw new HttpError(413, "PAYLOAD_TOO_LARGE", "Token image is too large.");
+    throw new HttpError(413, "PAYLOAD_TOO_LARGE", tooLarge);
   }
   if (!request.body) return new Uint8Array(0);
   const reader = request.body.getReader();
@@ -79,7 +75,7 @@ async function readBody(request: Request, maxBytes: number): Promise<Uint8Array>
     total += value.byteLength;
     if (total > maxBytes) {
       await reader.cancel();
-      throw new HttpError(413, "PAYLOAD_TOO_LARGE", "Token image is too large.");
+      throw new HttpError(413, "PAYLOAD_TOO_LARGE", tooLarge);
     }
     chunks.push(value);
   }
@@ -92,11 +88,26 @@ async function readBody(request: Request, maxBytes: number): Promise<Uint8Array>
   return out;
 }
 
+async function readJson(request: Request): Promise<Record<string, unknown>> {
+  const bytes = await readBody(request, 16 * 1024, "Request body is too large.");
+  try {
+    const value = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  } catch {
+    // Reported below.
+  }
+  throw badRequest("Expected a JSON object.");
+}
+
 export function createHandler(deps: HandlerDeps): (request: Request) => Promise<Response> {
   const { config, projects, pages, tokens } = deps;
   const log = deps.log ?? ((m: string) => console.log(m));
   const makeClient = deps.makeClient ?? ((apiKey: string) => new LkClient({ baseUrl: config.lkBaseUrl, apiKey }));
-  const clients = new TtlCache<string, LkClient>({ ttlMs: 30 * 60_000, maxEntries: 200 });
+  const keys = new ServerKeys(
+    config.lkApiKeys.map((apiKey, i) => ({ keyId: `k${i}`, client: makeClient(apiKey) })),
+    projects,
+  );
+  const tokenDigests = Promise.all(config.accessTokens.map((t) => sha256Hex(t)));
   const limiter = new RateLimiter(config.rateLimitPerMinute);
 
   function corsHeaders(request: Request): Record<string, string> {
@@ -114,22 +125,17 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
   }
 
   /**
-   * The caller's LegendKeeper API key, sent by the extension on each request
-   * and used for that request only. It is never stored or logged; caches are
-   * keyed by its digest. LegendKeeper itself decides whether the key is good.
+   * Checks the access password the extension sends and returns a rate-limit
+   * key for it. The password only opens this server; LegendKeeper's keys
+   * stay in the server's secrets and never reach a browser.
    */
-  async function authenticate(request: Request): Promise<Caller> {
+  async function authenticate(request: Request): Promise<string> {
     const match = /^Bearer\s+(.+)$/i.exec(request.headers.get("authorization") ?? "");
-    const apiKey = match?.[1].trim() ?? "";
-    if (!apiKey) throw new HttpError(401, "UNAUTHORIZED", "Add your LegendKeeper API key in the extension's settings.");
-    if (!API_KEY_PATTERN.test(apiKey)) throw new HttpError(401, "UNAUTHORIZED", "That doesn't look like a LegendKeeper API key.");
-    const keyId = (await sha256Hex(apiKey)).slice(0, 32);
-    let client = clients.get(keyId);
-    if (!client) {
-      client = makeClient(apiKey);
-      clients.set(keyId, client);
-    }
-    return { keyId, client };
+    if (!match) throw new HttpError(401, "UNAUTHORIZED", "Enter the access password in the extension's settings.");
+    const candidate = await sha256Hex(match[1].trim());
+    const index = (await tokenDigests).findIndex((d) => digestsEqual(d, candidate));
+    if (index < 0) throw new HttpError(401, "UNAUTHORIZED", "The server didn't accept that access password.");
+    return `t${index}`;
   }
 
   function rateLimit(key: string): void {
@@ -137,6 +143,28 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
     if (wait !== null) {
       throw new HttpError(429, "RATE_LIMITED", "Too many requests. Slow down a little.", { retryable: true, retryAfter: wait });
     }
+  }
+
+  /**
+   * A stored page list. With `since` (the `generatedAt` the browser already
+   * has), an unchanged list answers 204 without being downloaded again.
+   */
+  async function storedPageList(audience: PageListAudience, projectId: string, url: URL, cors: Record<string, string>): Promise<Response> {
+    const since = url.searchParams.get("since");
+    if (since && (await pages.pageListVersion(audience, projectId)) === since) {
+      return new Response(null, { status: 204, headers: { ...cors, "Cache-Control": "no-store" } });
+    }
+    const list = await pages.storedPageList(audience, projectId);
+    if (list === null) {
+      throw new HttpError(
+        404,
+        "PAGE_LIST_NOT_BUILT",
+        audience === "gm"
+          ? "The page list hasn't been built yet."
+          : "The page list hasn't been built yet. Your GM can build it with Refresh page list in Settings.",
+      );
+    }
+    return new Response(list, { status: 200, headers: { ...cors, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
   }
 
   function tokenUrl(request: Request, fileName: string): string {
@@ -185,30 +213,43 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
       return json(200, body, cors);
     }
 
-    // GET /api/public/projects/:projectId/resources?cursor=: players' page list, a chunk at a time.
-    // Public by design: it is fetched from LegendKeeper without a key, so it
+    // GET /api/public/projects/:projectId/page-list[?since=]: the players' page list, as stored.
+    // Public by design: it is listed from LegendKeeper without a key, so it
     // holds only what LegendKeeper shows anonymous visitors anyway.
-    if (parts[1] === "public" && parts[2] === "projects" && parts[4] === "resources" && parts.length === 5 && method === "GET") {
+    if (parts[1] === "public" && parts[2] === "projects" && parts[4] === "page-list" && parts.length === 5 && method === "GET") {
       if (!ID_PATTERN.test(parts[3])) throw badRequest("Invalid project id.");
       rateLimit(`ip:${request.headers.get("cf-connecting-ip") ?? "local"}`);
-      return json(200, await pages.publicResourceChunk(parts[3], listCursor(url)), cors);
+      return storedPageList("public", parts[3], url, cors);
     }
 
-    const caller = await authenticate(request);
-    rateLimit(`key:${caller.keyId}`);
+    rateLimit(`pw:${await authenticate(request)}`);
 
-    // GET /api/projects[?refresh=1]: the project the key opens.
+    // GET /api/projects[?refresh=1]: the projects the server's keys open.
     if (parts[1] === "projects" && parts.length === 2 && method === "GET") {
-      return json(200, await projects.list(caller, url.searchParams.get("refresh") === "1"), cors);
+      return json(200, await keys.list(url.searchParams.get("refresh") === "1"), cors);
     }
 
     if (parts[1] === "projects" && parts.length >= 4) {
       const projectId = parts[2];
       if (!ID_PATTERN.test(projectId)) throw badRequest("Invalid project id.");
 
-      // GET /api/projects/:projectId/resources?cursor=[&fresh=1]: the GM's page list, a chunk at a time.
-      if (parts[3] === "resources" && parts.length === 4 && method === "GET") {
-        return json(200, await pages.resourceChunk(caller, projectId, listCursor(url), url.searchParams.get("fresh") === "1"), cors);
+      // GET /api/projects/:projectId/page-list[?since=]: the GM's page list (hidden pages included), as stored.
+      if (parts[3] === "page-list" && parts.length === 4 && method === "GET") {
+        return storedPageList("gm", projectId, url, cors);
+      }
+
+      const caller = await keys.callerFor(projectId);
+
+      // POST /api/projects/:projectId/page-list/build: one step of rebuilding a stored page list.
+      if (parts[3] === "page-list" && parts[4] === "build" && parts.length === 5 && method === "POST") {
+        const body = (await readJson(request)) as Partial<PageListBuildStep>;
+        const step: PageListBuildStep = {
+          audience: body.audience as PageListAudience,
+          buildId: String(body.buildId ?? ""),
+          part: Number(body.part),
+          cursor: typeof body.cursor === "string" ? body.cursor : "",
+        };
+        return json(200, await pages.buildPageListStep(caller, projectId, step), cors);
       }
 
       // GET /api/projects/:projectId/search?q=&limit=
@@ -258,8 +299,6 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
 
     if (parts[1] === "tokens") {
       if (!tokens) throw new HttpError(404, "NOT_FOUND", "Token hosting is turned off on this server.");
-      // Only someone with a working LegendKeeper key may store or delete tokens.
-      await projects.projectOf(caller);
 
       // POST /api/tokens  (body: PNG or WebP bytes)
       if (parts.length === 2 && method === "POST") {

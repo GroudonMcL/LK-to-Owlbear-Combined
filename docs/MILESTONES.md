@@ -264,3 +264,34 @@ room or scene, and a player's public-only matches and public view.
   popover.
 - Text links open the real LegendKeeper page, as tokens do; the API view is a switch.
 - The side panel can be resized by dragging its left edge, and remembers its width.
+
+## Milestone 8: The API key back in the Worker; stored page lists
+
+**Implemented**
+- **One key source again.** The LegendKeeper key is the `LK_API_KEYS` repository secret,
+  stored in the Worker by the deploy (as before Milestone 7), behind the `LKOB_ACCESS_TOKENS`
+  password the GM enters in Settings. The key never reaches a browser. One that an earlier
+  version saved in a browser is deleted when the extension loads. Several keys (one per
+  project) are supported; with several, Settings offers a project choice.
+- **Stored page lists.** The Worker builds the GM's list and the players' public list and
+  keeps them in KV (`page-list/<gm|public>/<project>`), so joining a room is one download
+  instead of 130 LegendKeeper calls per browser. A list is built in resumable steps
+  (`POST /api/projects/:p/page-list/build`, 15 LegendKeeper calls each); the parts are
+  kept for an hour and the finished list replaces the old one in one write.
+- **Who builds.** The deploy workflow builds both lists after deploying
+  (`deploy/page-list.mjs`; a failure is a warning, not a failed deploy). **Refresh page
+  list** rebuilds them and tells every browser in the room to fetch the new list. A GM
+  whose server has no list yet builds it on connecting.
+- **Keeping current.** Browsers keep the list in local storage and ask every 5 minutes
+  whether there's a newer one (`?since=` answers 204 when there isn't).
+
+**Tests run.** Password auth, per-project keys, step-by-step builds, the old list staying
+in place until a rebuild finishes, 204 for unchanged lists, keyless public builds and
+unknown projects, on Node and on the Worker. Also the deploy helper against a live
+handler, and e2e: a wrong then right password, the first connect building the list, and
+the API key never reaching browser storage.
+
+**Known limitations**
+- KV is eventually consistent: a rebuilt list can take up to a minute to reach other
+  Cloudflare locations. Browsers told about a rebuild check again after 65 seconds.
+- A stored list holds up to 60 build steps (about 90,000 pages).
