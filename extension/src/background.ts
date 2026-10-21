@@ -14,12 +14,15 @@ import { describeOpenError, linkToken, openForToken } from "./lib/open";
 import { loadPageList, PAGE_LIST_STATUS_KEY, readStatus } from "./lib/pageLists";
 import { publishProject } from "./lib/project";
 import { SCENE_LINK_SETTINGS_KEY } from "./lib/sceneLinkSettings";
+import { parseSharedPage, receiveSharedPage, showShareRequest } from "./lib/share";
 import { loadSettings, requestNavigation, SETTINGS_STORAGE_KEY } from "./lib/settings";
 import { PageMatcher, type ItemTextMatches } from "./lib/textMatch";
 import { isToken, TOKEN_FILTER } from "./lib/token";
 import {
   CH_PAGES_REFRESHED,
   CH_PLACE,
+  CH_SHARE_OPEN,
+  CH_SHARE_REQUEST,
   CH_TOKEN_CREATED,
   extensionUrl,
   IMPORT_MENU_ID,
@@ -320,6 +323,17 @@ OBR.onReady(async () => {
   // A player's page list depends on the project the GM records on the room.
   OBR.room.onMetadataChange(() => scheduleTextScan());
   OBR.broadcast.onMessage(CH_PLACE, (event) => void startPlacement(event.data as PlacementRequest));
+  // "Open for everyone": the GM shared a page, or a player asks the GM to.
+  OBR.broadcast.onMessage(CH_SHARE_OPEN, (event) => {
+    const page = parseSharedPage(event.data);
+    if (!page) return;
+    receiveSharedPage(obrPlatform, page).catch((err: unknown) => void OBR.notification.show(describeOpenError(err), "ERROR"));
+  });
+  OBR.broadcast.onMessage(CH_SHARE_REQUEST, async (event) => {
+    const page = parseSharedPage(event.data);
+    if (!page || (await OBR.player.getRole()) !== "GM") return;
+    await showShareRequest(obrPlatform, page).catch((err: unknown) => console.warn("[LegendKeeper] share request", err));
+  });
   OBR.scene.items.onChange((items) => {
     scheduleIndexSync();
     scheduleTextScan(items);

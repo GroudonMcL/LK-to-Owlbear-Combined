@@ -13,8 +13,8 @@ import { Banner, Button, Spinner } from "../ui/components";
 import { PageListStatusLine } from "../ui/PageListStatusLine";
 import type { TextMatchState } from "../ui/useTextMatches";
 import { OpenModeField } from "./OpenModeField";
+import { SceneLinksField } from "./SceneLinksField";
 import { SceneTextView } from "./SceneTextView";
-import { TestSettingsView } from "./TestSettingsView";
 
 export function PlayerView({ platform, textMatches }: { platform: Platform; textMatches: TextMatchState }) {
   const [list, setList] = useState<PageList | null>(null);
@@ -82,10 +82,7 @@ export function PlayerView({ platform, textMatches }: { platform: Platform; text
       <section className="card stack">
         <div className="eyebrow">Opening pages</div>
         <OpenModeField isPublic={list?.isPublic} />
-      </section>
-      <section className="stack">
-        <div className="eyebrow">Test settings</div>
-        <TestSettingsView role="PLAYER" />
+        <SceneLinksField role="PLAYER" />
       </section>
     </div>
   );

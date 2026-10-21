@@ -156,6 +156,8 @@ export const obrPlatform: Platform = {
 
   startPlacement: (request: PlacementRequest) => OBR.broadcast.sendMessage(CH_PLACE, request, { destination: "LOCAL" }),
   sendLocal: (channel, data) => OBR.broadcast.sendMessage(channel, data, { destination: "LOCAL" }),
+  sendToRoom: (channel, data) => OBR.broadcast.sendMessage(channel, data, { destination: "REMOTE" }),
+  playerName: () => OBR.player.getName(),
   onLocal: (channel, cb) => OBR.broadcast.onMessage(channel, (event) => cb(event.data)),
 
   getTheme: async () => themeInfo(await OBR.theme.getTheme()),

@@ -4,10 +4,11 @@
 // The full app (and so editing) refuses to be framed (X-Frame-Options: DENY),
 // so it opens in a tab.
 
-import { ArrowLeft, ChevronLeft, ChevronRight, EyeOff, House, PenLine, SquareArrowOutUpRight, X } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, EyeOff, House, PenLine, SquareArrowOutUpRight, Users, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Role } from "../lib/pageLists";
 import { savePanelWidth } from "../lib/panelWidth";
+import { askToOpenForEveryone, openForEveryone } from "../lib/share";
 import { publicPageUrl, tabUrl } from "../lib/urls";
 import { PANEL_POPOVER_ID } from "../platform/channels";
 import type { Platform } from "../platform/types";
@@ -91,14 +92,34 @@ export function PanelApp({ platform }: { platform: Platform }) {
           </IconButton>
         )}
         {role === "GM" ? (
-          <a className="btn btn-sm" href={fullPageUrl} target="_blank" rel="noopener noreferrer" title="Open the page in LegendKeeper's editor, in a new tab">
-            <PenLine /> Edit in LegendKeeper
+          <a className="btn btn-sm btn-collapse" href={fullPageUrl} target="_blank" rel="noopener noreferrer" aria-label="Edit in LegendKeeper" title="Open the page in LegendKeeper's editor, in a new tab">
+            <PenLine /> <span className="btn-label">Edit in LegendKeeper</span>
           </a>
         ) : (
-          <a className="btn btn-sm" href={fullPageUrl} target="_blank" rel="noopener noreferrer" title="Open in a new tab">
-            <SquareArrowOutUpRight /> Open in LegendKeeper
+          <a className="btn btn-sm btn-collapse" href={fullPageUrl} target="_blank" rel="noopener noreferrer" aria-label="Open in LegendKeeper" title="Open in a new tab">
+            <SquareArrowOutUpRight /> <span className="btn-label">Open in LegendKeeper</span>
           </a>
         )}
+        <button
+          type="button"
+          className="btn btn-sm btn-collapse"
+          aria-label="Open for everyone"
+          disabled={role === null || currentHidden}
+          title={
+            currentHidden
+              ? "This page is hidden from players in LegendKeeper"
+              : role === "GM"
+                ? "Open this page for everyone in the room"
+                : "Ask the GM to open this page for everyone"
+          }
+          onClick={() => {
+            const page = { projectId, resourceId: current.resourceId, name: current.name };
+            const share = role === "GM" ? openForEveryone : askToOpenForEveryone;
+            void share(platform, page).catch((err: unknown) => platform.notify(`Couldn't share the page: ${String(err)}`, "ERROR"));
+          }}
+        >
+          <Users /> <span className="btn-label">Open for everyone</span>
+        </button>
         <IconButton label="Close panel" onClick={() => void platform.closeSidePanel(PANEL_POPOVER_ID)}>
           <X />
         </IconButton>

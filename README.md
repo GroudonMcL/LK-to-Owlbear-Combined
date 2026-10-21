@@ -96,24 +96,28 @@ the players' popover) show its state, e.g. *D&D - Greyhawk: loading pages…* an
     them, and get only LegendKeeper's public view. In a private project, their links
     explain that pages can't be shown to players.
 
-### Links on the map (testing)
+### Links on the map (everyone)
 
-The **Test settings** tab in the toolbar popover (players: a section at the bottom of
-theirs) marks page names right in the notes and Text items. It is on by default; each
-person can turn it off or try the options, which are kept in their own browser.
+Page names in notes and Text items are underlined and clickable right on the map. It is
+on by default; **Settings → Opening pages** (players: their popover) turns it off.
 
-- **Underline:** *Drawn over* draws lines under the words, only in that person's
-  browser, for the pages they can open. *Real underline* (GM only) writes the underline
-  into the note's own text so everyone sees it, for public pages only; switching away
-  takes those underlines off again and leaves ones you typed alone. *None* draws nothing.
-- **Click a linked word** (option B): an invisible box sits over each linked word.
-  Clicking it opens the page as the In this scene tab would.
-- **Book badge** (option C): a book on the corner of each note or text that names pages.
-  It opens the page, or a list when the text names several.
-- **Line-up:** Owlbear doesn't say where it draws each word, so the extension works out
-  the layout from the font, size, padding, alignment and wrap width. **Show click areas**
-  shows what it worked out, and the sliders (text size, heading sizes, list indent,
-  paragraph gap, underline height) calibrate it. Rotated notes and text get the badge only.
+- **Underlines** are written into the notes' own text by the GM's browser, so everyone
+  sees them. Only public pages are underlined, so players never learn a hidden page's
+  name. Turning the setting off takes these underlines off again and leaves ones you
+  typed alone. Notes the GM has selected (being edited) are left until they're done.
+- **Click a linked word** to open its page, as the In this scene tab would. An almost
+  invisible box sits over each linked word; Owlbear doesn't say where it draws each word,
+  so the extension works out the layout from the font, size, padding, alignment and
+  wrap width. Each person clicks through to the pages they can open. Rotated notes and
+  text keep the right-click menu only.
+
+### Open for everyone
+
+**Open for everyone**, next to **Edit in LegendKeeper** in the page panel, opens the page
+in every browser in the room, each in that person's chosen place (panel or tab). Players
+only see public pages, as always. When a player clicks it, the GM is asked to approve
+first. LegendKeeper's public view is another site in a frame, so the extension can't
+read or set where it is scrolled: everyone opens the page at the top.
 
 ### Token importer (GM)
 

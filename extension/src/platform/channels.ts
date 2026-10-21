@@ -10,12 +10,17 @@ export const PICKER_MODAL_ID = `${NAMESPACE}/picker`;
 export const TAB_MODAL_ID = `${NAMESPACE}/tab`;
 export const PANEL_POPOVER_ID = `${NAMESPACE}/panel`;
 export const TEXT_MENU_ID = `${NAMESPACE}/text-pages`;
+export const SHARE_MODAL_ID = `${NAMESPACE}/share-request`;
 
 /** Local broadcast channels between this extension's frames. */
 export const CH_PLACE = `${NAMESPACE}/place`;
 export const CH_TOKEN_CREATED = `${NAMESPACE}/token-created`;
 /** The page list was reloaded on purpose ("Refresh page list"): match again. */
 export const CH_PAGES_REFRESHED = `${NAMESPACE}/pages-refreshed`;
+
+/** Between browsers in the room: open a page for everyone, and a player asking the GM to. */
+export const CH_SHARE_OPEN = `${NAMESPACE}/share-open`;
+export const CH_SHARE_REQUEST = `${NAMESPACE}/share-request`;
 
 /** Absolute URL of one of this extension's pages or assets. */
 export function extensionUrl(path: string, params?: Record<string, string>): string {
