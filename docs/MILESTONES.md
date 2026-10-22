@@ -337,3 +337,15 @@ secret art withheld, and a player's token saved visible to Owlbear storage.
   stitches and runes. Sorcerer and Wizard got their own larger-scale finishes.
   Barbarian and Fighter now have dents and scratches from battle. The Artificer's inner
   edge is cut into gear teeth instead of the row of teeth outside.
+
+**Follow-up: small screens, fewer frames**
+- The token editor opens no larger than the Owlbear window (full screen below 640×520),
+  and short windows get a smaller preview, so Create token is never cut off. The e2e
+  host now opens modals at the size asked for, as Owlbear does, and checks a 1024×600
+  and a 600×760 window.
+- Frames: the class frames are gone, except Wizard, Druid and Artificer, renamed Runes,
+  Nature and Construct (now in Textures). Double line and Cobblestone are removed too.
+- Harlequin: an even number of diamonds (a whole number per side of a polygon), so light
+  and dark always alternate, at the top too. Their tips meet without overlapping, a
+  polygon's corners fall on tips, and their shades are taken from the band's lighting, so
+  light and dark read apart all the way round.

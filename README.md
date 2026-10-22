@@ -160,31 +160,16 @@ GM allows it:
   or an alias (for example "Tiamat" for *Tiamat (God Template clip)*) are listed too, and
   **Use existing** links one to the page instead of importing a new token. Copies, renamed pages, deleted tokens, tokens in other scenes, broken link
   data and failed lookups are all handled explicitly.
-- **Token editor.** A large live preview with drag, wheel or pinch zoom around the
+- **Token editor.** It fits the window: on a small screen or a tablet it opens smaller,
+  or full screen, with the preview above the controls. A large live preview with drag, wheel or pinch zoom around the
   cursor, rotation, flip, fit/fill/reset, and a dimmed view of the art outside the frame.
-  There are five shapes and 27 frames, in three groups, all built the way **Stamped**
-  (the default) is: a band lit from the top left, a pressed-in inner step, a drop shadow
-  and a shadow cast onto the art.
-  - **Classic**: Stamped, Gilded, Engraved, Arcane, Infernal, Double line, Polished and
-    No frame.
-  - **Textures**: Oak, Cobblestone, Magma, Harlequin, Knotwork and Starfield.
-  - **Classes**: one per D&D class plus Artificer:
-
-    | Class | Frame |
-    | --- | --- |
-    | Barbarian | battle-worn hide with claw gashes |
-    | Bard | music notes |
-    | Cleric | sunburst |
-    | Druid | vines |
-    | Fighter | battle-worn riveted steel |
-    | Monk | prayer beads with jade beads |
-    | Paladin | silver with gold crosses |
-    | Ranger | fletching |
-    | Rogue | stitched leather |
-    | Sorcerer | dragon scales |
-    | Warlock | watching eyes |
-    | Wizard | runes |
-    | Artificer | brass with a toothed inner edge, like a ring gear, and gears |
+  There are five shapes and 17 frames, in two groups, all built the way **Stamped** (the
+  default) is: a band lit from the top left, a pressed-in inner step, a drop shadow and a
+  shadow cast onto the art.
+  - **Classic**: Stamped, Gilded, Engraved, Arcane, Infernal, Polished and No frame.
+  - **Textures**: Oak, Magma, Harlequin, Knotwork, Starfield, Runes (large glowing
+    runes), Nature (vines and leaves) and Construct (brass with a toothed inner edge,
+    like a ring gear, and gears).
 
   Every frame takes any colour, thickness, spacing, backing and opacity. Outer spacing
   starts at 10%, which leaves room for the drop shadow. **Keep the frame filled** starts
@@ -385,7 +370,7 @@ extension. Code layout:
 
 ```sh
 npm install
-npm test                 # 370 unit/integration tests
+npm test                 # 358 unit/integration tests
 npm run typecheck
 npm run build:cloudflare && npm run e2e   # end-to-end in the Workers runtime (needs Chromium)
 ```
@@ -398,7 +383,7 @@ npm run build:cloudflare && npm run e2e   # end-to-end in the Workers runtime (n
   and the deploy helpers.
 - `npm run e2e` runs the production bundle with the real `@owlbear-rodeo/sdk`, served by
   `wrangler dev` (workerd), inside an **Owlbear host emulator** that speaks the SDK's
-  message protocol from another origin. 114 checks cover the GM's import, page-link and
+  message protocol from another origin. 116 checks cover the GM's import, page-link and
   scene-text workflows and a player's. Screenshots go to `e2e/output/`. Set `CHROMIUM_PATH` to use a
   locally installed Chromium.
 - UI work without Owlbear: `npm run demo` (mock LegendKeeper + API on :8787) and

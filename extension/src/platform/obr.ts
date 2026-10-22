@@ -39,6 +39,10 @@ const onSceneReadyChange = shared<boolean>((cb) => OBR.scene.onReadyChange(cb));
 const PANEL_MARGIN = 8;
 const MIN_PANEL_WIDTH = 320;
 
+/** The editor's preferred size, and the space it leaves around itself in a smaller window. */
+const EDITOR_SIZE = { width: 1120, height: 760 };
+const EDITOR_GUTTER = 48;
+
 export const obrPlatform: Platform = {
   kind: "owlbear",
 
@@ -91,8 +95,19 @@ export const obrPlatform: Platform = {
     await OBR.notification.show(message, variant);
   },
 
-  openEditor: (query) =>
-    OBR.modal.open({ id: EDITOR_MODAL_ID, url: `${extensionUrl("editor.html")}?${query}`, width: 1120, height: 760 }),
+  async openEditor(query) {
+    // As large as it is useful, but never larger than the window: on a small screen
+    // or a tablet a fixed size would be cut off at the bottom.
+    const [vw, vh] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]).catch(() => [1280, 900]);
+    const url = `${extensionUrl("editor.html")}?${query}`;
+    if (vw < 640 || vh < 520) return OBR.modal.open({ id: EDITOR_MODAL_ID, url, fullScreen: true });
+    await OBR.modal.open({
+      id: EDITOR_MODAL_ID,
+      url,
+      width: Math.round(Math.min(EDITOR_SIZE.width, vw - EDITOR_GUTTER)),
+      height: Math.round(Math.min(EDITOR_SIZE.height, vh - EDITOR_GUTTER)),
+    });
+  },
   closeEditor: () => OBR.modal.close(EDITOR_MODAL_ID),
 
   roomId: () => OBR.room.id,

@@ -226,8 +226,9 @@
       const snap = (v) => (d.useCorners ? Math.round(v / SCENE_DPI) * SCENE_DPI : Math.floor(v / SCENE_DPI) * SCENE_DPI + SCENE_DPI / 2);
       return { position: { x: snap(d.position.x), y: snap(d.position.y) } };
     },
-    OBR_VIEWPORT_GET_WIDTH: () => ({ width: 1200 }),
-    OBR_VIEWPORT_GET_HEIGHT: () => ({ height: 800 }),
+    // The scene viewport fills the window, as in Owlbear.
+    OBR_VIEWPORT_GET_WIDTH: () => ({ width: innerWidth }),
+    OBR_VIEWPORT_GET_HEIGHT: () => ({ height: innerHeight }),
     OBR_VIEWPORT_INVERSE_TRANSFORM_POINT: (_f, d) => ({ point: { x: d.point.x + 400, y: d.point.y + 300 } }),
     OBR_VIEWPORT_ANIMATE_TO_BOUNDS: (_f, d) => {
       state.animatedTo = d.bounds;
@@ -242,8 +243,10 @@
       state.modals[d.id]?.el.remove();
       const el = document.createElement("iframe");
       el.className = "modal";
-      el.style.width = `${Math.min(d.width ?? 800, innerWidth - 40)}px`;
-      el.style.height = `${Math.min(d.height ?? 600, innerHeight - 40)}px`;
+      // Owlbear opens a modal at the size asked for, even past the window's edge.
+      el.style.width = d.fullScreen ? "100vw" : `${d.width ?? 800}px`;
+      el.style.height = d.fullScreen ? "100vh" : `${d.height ?? 600}px`;
+      if (d.fullScreen) el.style.borderRadius = "0";
       el.dataset.modal = d.id;
       document.body.appendChild(el);
       state.modals[d.id] = loadFrame(`modal:${d.id}`, d.url, el);

@@ -63,7 +63,7 @@ export const DEFAULT_ADJUSTMENTS: ImageAdjustments = {
   backgroundTolerance: 18,
 };
 
-export type FrameGroup = "Classic" | "Textures" | "Classes";
+export type FrameGroup = "Classic" | "Textures";
 
 export interface FramePreset {
   id: string;
@@ -85,33 +85,20 @@ export const FRAME_PRESETS: FramePreset[] = [
   preset("engraved", "Engraved", "Classic", "engraved", "#7a7f8a"),
   preset("arcane", "Arcane", "Classic", "arcane", "#6fc3ff"),
   preset("infernal", "Infernal", "Classic", "arcane", "#ff6a3d"),
-  preset("double", "Double line", "Classic", "double", "#c9b27a"),
   preset("minimal", "Polished", "Classic", "line", "#8a8f99"),
   { id: "none", name: "No frame", group: "Classic", style: { frame: "none", frameColor: "#ffffff", borderWidth: 0, margin: 0 } },
 
   preset("oak", "Oak", "Textures", "wood", "#8a5a32"),
-  preset("cobblestone", "Cobblestone", "Textures", "stone", "#8b8579"),
   preset("magma", "Magma", "Textures", "magma", "#ff7a1a"),
   preset("harlequin", "Harlequin", "Textures", "harlequin", "#8c2f4a"),
   preset("knotwork", "Knotwork", "Textures", "braid", "#c9a24a"),
   preset("starfield", "Starfield", "Textures", "starfield", "#6a5ad8"),
-
-  preset("barbarian", "Barbarian", "Classes", "claws", "#8a5a3a"),
-  preset("bard", "Bard", "Classes", "notes", "#8e3b8f"),
-  preset("cleric", "Cleric", "Classes", "radiant", "#e0b84a"),
-  preset("druid", "Druid", "Classes", "vines", "#6aa83a"),
-  preset("fighter", "Fighter", "Classes", "riveted", "#8c929c"),
-  preset("monk", "Monk", "Classes", "beads", "#c4622c"),
-  preset("paladin", "Paladin", "Classes", "holy", "#c9d2de"),
-  preset("ranger", "Ranger", "Classes", "fletching", "#4f6b3a"),
-  preset("rogue", "Rogue", "Classes", "stitched", "#4a3f3c"),
-  preset("sorcerer", "Sorcerer", "Classes", "sorcerer", "#b8322a"),
-  preset("warlock", "Warlock", "Classes", "eyes", "#5b2d7a"),
-  preset("wizard", "Wizard", "Classes", "wizard", "#3f6fd8"),
-  preset("artificer", "Artificer", "Classes", "clockwork", "#b5813a"),
+  preset("runes", "Runes", "Textures", "wizard", "#3f6fd8"),
+  preset("nature", "Nature", "Textures", "vines", "#6aa83a"),
+  preset("construct", "Construct", "Textures", "clockwork", "#b5813a"),
 ];
 
-export const FRAME_GROUPS: FrameGroup[] = ["Classic", "Textures", "Classes"];
+export const FRAME_GROUPS: FrameGroup[] = ["Classic", "Textures"];
 
 /** Every frame style there is, for checking saved settings. */
 export const FRAME_STYLES = new Set<string>(["none", "stamped", ...FRAME_PRESETS.map((p) => p.style.frame)]);

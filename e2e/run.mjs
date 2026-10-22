@@ -199,11 +199,29 @@ async function main() {
 
   console.log("Editor, export, linked token with size");
   await pop.locator(".image-card").nth(1).click();
+  // A small window (a tablet, or a laptop with the browser's bars): the editor fits, Create token included.
+  for (const size of [{ width: 1024, height: 600 }, { width: 600, height: 760 }]) {
+    await page.setViewportSize(size);
+    await pop.getByRole("button", { name: "Edit token" }).click();
+    const small = page.frameLocator('iframe[data-modal$="/editor"]');
+    await small.locator(".token-layer").waitFor();
+    const frameBox = await page.locator('iframe[data-modal$="/editor"]').boundingBox();
+    const createBox = await small.getByRole("button", { name: "Create token" }).boundingBox();
+    check(
+      `the editor fits a ${size.width}×${size.height} window, Create token in view`,
+      frameBox.y >= 0 && frameBox.y + frameBox.height <= size.height + 1 && frameBox.x + frameBox.width <= size.width + 1 && createBox.y + createBox.height <= size.height,
+      JSON.stringify({ frameBox, createBox }),
+    );
+    await shot(`03a-editor-${size.width}x${size.height}`);
+    await small.getByRole("button", { name: "Close editor" }).click();
+    await page.waitForFunction(() => !document.querySelector('iframe[data-modal$="/editor"]'), null, { timeout: 5000 });
+  }
+  await page.setViewportSize({ width: 1400, height: 900 });
   await pop.getByRole("button", { name: "Edit token" }).click();
   const modal = page.frameLocator('iframe[data-modal$="/editor"]');
   await modal.locator(".token-layer").waitFor();
   await modal.getByText("Loading artwork").waitFor({ state: "detached" });
-  check("class frames offered", (await modal.getByRole("button", { name: "Barbarian" }).count()) === 1 && (await modal.getByRole("button", { name: "Artificer" }).count()) === 1);
+  check("Runes, Nature and Construct frames offered", (await modal.getByRole("button", { name: "Runes" }).count()) === 1 && (await modal.getByRole("button", { name: "Nature" }).count()) === 1 && (await modal.getByRole("button", { name: "Construct" }).count()) === 1 && (await modal.getByRole("button", { name: "Barbarian" }).count()) === 0);
   await modal.getByRole("button", { name: "Arcane" }).click();
   await modal.getByRole("button", { name: "Large", exact: true }).click();
   await page.waitForTimeout(400);
@@ -354,7 +372,7 @@ async function main() {
   await page.waitForFunction((ns) => Boolean(window.host.state.popovers[`${ns}/panel`]), NS, { timeout: 10_000 });
   let panel = (await host(() => window.host.popovers()))[`${NS}/panel`];
   check("Open LK Page opens an imported token's own page in the side panel", new URL(panel.url).searchParams.get("resource") === "goblin", panel.url);
-  check("the side panel is pinned right, full height, and survives click-away", panel.options.anchorOrigin?.horizontal === "RIGHT" && panel.options.disableClickAway === true && panel.options.height === 784);
+  check("the side panel is pinned right, full height, and survives click-away", panel.options.anchorOrigin?.horizontal === "RIGHT" && panel.options.disableClickAway === true && panel.options.height === (await page.evaluate(() => innerHeight)) - 16);
   await panelFrame.getByText("Goblin Boss").first().waitFor();
   check("the panel frames LegendKeeper's public view", (await panelFrame.locator("iframe.lk-frame").getAttribute("src")) === "https://www.legendkeeper.com/p/proj_test01/goblin/");
   check("the GM's Edit in LegendKeeper link opens the LegendKeeper app", (await panelFrame.getByRole("link", { name: /Edit in LegendKeeper/ }).getAttribute("href")) === "https://www.legendkeeper.com/a/proj_test01/goblin/");
